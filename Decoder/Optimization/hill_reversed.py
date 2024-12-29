@@ -4,6 +4,9 @@ import pyvisa
 import json
 import random
 
+
+# Apparently forward Hill is better.
+
 # Serial port configuration
 SERIAL_PORT = 'COM4'
 BAUD_RATE = 9600
@@ -45,7 +48,7 @@ def send_heater_values(ser, config):
     ser.flush()
     ser.reset_input_buffer()
     ser.reset_output_buffer()
-    time.sleep(1.5)
+    time.sleep(2)
 
 def measure_outputs():
     """Measure outputs from oscilloscope"""
