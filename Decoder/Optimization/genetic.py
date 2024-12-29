@@ -11,8 +11,8 @@ SERIAL_PORT = 'COM4'
 BAUD_RATE = 9600
 
 # Genetic Algorithm Parameters
-POPULATION_SIZE = 20
-NUM_GENERATIONS = 15
+POPULATION_SIZE = 10
+NUM_GENERATIONS = 10
 MUTATION_RATE = 0.1
 CROSSOVER_RATE = 0.8    
 ELITE_SIZE = 2
@@ -88,7 +88,7 @@ class HeaterGA:
         ser.flush()
         ser.reset_input_buffer()
         ser.reset_output_buffer()
-        time.sleep(0.01)
+        time.sleep(2)
 
     def measure_outputs(self) -> List[float]:
         """Measure outputs from oscilloscope"""
@@ -118,8 +118,7 @@ class HeaterGA:
             current_config[str(self.input_heaters[1])] = input_state[1]
             
             self.send_heater_values(ser, current_config)
-            time.sleep(2)  # Allow outputs to stabilize
-            
+           
             outputs = self.measure_outputs()
             if None in outputs:
                 return -1000
@@ -233,7 +232,7 @@ def main():
     try:
         # Initialize serial connection
         ser = serial.Serial(SERIAL_PORT, BAUD_RATE)
-        time.sleep(2)
+        time.sleep(1)
         
         # Create and run genetic algorithm
         ga = HeaterGA()
@@ -250,8 +249,7 @@ def main():
         
         # Print final configuration
         print("\nFinal Heater Configuration:")
-        for heater in sorted(best_config.keys()):
-            print(f"Heater {heater}: {best_config[heater]:.2f}V")
+        print("{" + ", ".join(f'"{k}": {best_config[k]:.2f}' for k in sorted(best_config.keys())) + "}")
             
         # Test final configuration
         print("\nTesting final configuration:")
@@ -261,7 +259,7 @@ def main():
             current_config[str(ga.input_heaters[1])] = input_state[1]
             
             ga.send_heater_values(ser, current_config)
-            time.sleep(2)
+            
             outputs = ga.measure_outputs()
             
             print(f"\nInputs (A, B): {input_state}")
