@@ -8,6 +8,14 @@ import random
 SERIAL_PORT = 'COM4'
 BAUD_RATE = 9600
 
+# Initialize oscilloscope
+rm = pyvisa.ResourceManager()
+resources = rm.list_resources()
+if not resources:
+    raise Exception("No VISA resources found")
+scope = rm.open_resource(resources[0])
+scope.timeout = 5000
+
 # Setup channels
 channels = ['CHANnel1', 'CHANnel2', 'CHANnel3', 'CHANnel4']
 for channel in channels:
