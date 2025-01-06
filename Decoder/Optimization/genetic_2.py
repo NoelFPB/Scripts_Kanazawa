@@ -1,18 +1,34 @@
-import random
+import serial
 import time
+import pyvisa
 import json
+import random
 
 # Constants
 SERIAL_PORT = 'COM4'
 BAUD_RATE = 9600
 
-# Heater and oscilloscope settings
+# Setup channels
 channels = ['CHANnel1', 'CHANnel2', 'CHANnel3', 'CHANnel4']
+for channel in channels:
+    scope.write(f':{channel}:DISPlay ON')
+    scope.write(f':{channel}:SCALe 2')
+    scope.write(f':{channel}:OFFSet -6')
+
+# Heater configuration
+heater_values = {i: 0.0 for i in range(40)}
 fixed_first_layer = list(range(33, 40))
 input_heaters = [36, 37]
-modifiable_heaters = sorted([i for i in range(33) if i not in input_heaters], reverse=True)
-voltage_options = [0.1, 2.5, 4.9]
 input_combinations = [(0.1, 0.1), (0.1, 4.9), (4.9, 0.1), (4.9, 4.9)]
+# Create modifiable_heaters in reverse order
+modifiable_heaters = sorted([i for i in range(33) if i not in input_heaters], reverse=True)
+
+# Set fixed first layer
+for heater in fixed_first_layer:
+    heater_values[heater] = 0.01
+
+# Voltage options - simplified set for faster convergence
+voltage_options = [0.1, 2.5, 4.9]
 
 # Initialize population
 def initialize_population(pop_size):
@@ -133,9 +149,17 @@ def send_heater_values(ser, config):
     time.sleep(2)
 
 def measure_outputs():
-    """Stub for oscilloscope output measurement."""
-    return [random.uniform(0, 5) for _ in range(4)]  # Replace with actual oscilloscope communication
-
+    """Measure outputs from oscilloscope"""
+    try:
+        outputs = []
+        for channel in range(1, 5):
+            value = float(scope.query(f':MEASure:STATistic:ITEM? CURRent,VMAX,CHANnel{channel}'))
+            outputs.append(round(value, 5))
+        return outputs
+    except Exception as e:
+        print(f"Measurement error: {e}")
+        return [None] * 4
+    
 # Main function
 def main():
     try:
