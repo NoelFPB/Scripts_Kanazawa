@@ -108,41 +108,69 @@ def mutate(chromo, mutation_rate):
             chromo[str(heater)] = random.choice(voltage_options)
     return chromo
 
+def select_parents_tournament(population, fitness, num_parents, tournament_size=3):
+    parents = []
+    for _ in range(num_parents):
+        competitors = random.sample(list(zip(population, fitness)), tournament_size)
+        winner = max(competitors, key=lambda x: x[1])
+        parents.append(winner[0])
+    return parents
+
+
 # GA main loop
-def genetic_algorithm(ser, pop_size=20, generations=50, mutation_rate=0.1):
-    """Run the Genetic Algorithm."""
-    # Initialize population
+def genetic_algorithm_with_logs(ser, pop_size=10, generations=30, mutation_rate=0.05):
+    """Run the Genetic Algorithm with optimizations."""
     population = initialize_population(pop_size)
-    fitness = [evaluate_configuration(ser, chromo) for chromo in population]
+    fitness_cache = {}
+    
+    def evaluate_with_cache(config):
+        config_tuple = tuple(sorted(config.items()))
+        if config_tuple in fitness_cache:
+            return fitness_cache[config_tuple]
+        fitness = evaluate_configuration(ser, config)
+        fitness_cache[config_tuple] = fitness
+        return fitness
+    
+    fitness = [evaluate_with_cache(chromo) for chromo in population]
     
     for generation in range(generations):
-        print(f"Generation {generation + 1}/{generations}")
-        
+        print(f"\n===== Generation {generation + 1}/{generations} =====")
+
         # Select parents
-        parents = select_parents(population, fitness, pop_size // 2)
+        parents = select_parents_tournament(population, fitness, pop_size // 2)
         
-        # Generate offspring through crossover
+        # Generate offspring
         offspring = []
         for i in range(0, len(parents), 2):
-            child1, child2 = crossover(parents[i], parents[i + 1])
-            offspring.extend([child1, child2])
-        
-        # Apply mutation
+            if i + 1 < len(parents):
+                parent1, parent2 = parents[i], parents[i + 1]
+                child1, child2 = crossover(parent1, parent2)
+                offspring.extend([child1, child2])
+
+        # Mutate offspring
         offspring = [mutate(chromo, mutation_rate) for chromo in offspring]
-        
+
         # Evaluate offspring fitness
-        offspring_fitness = [evaluate_configuration(ser, chromo) for chromo in offspring]
-        
-        # Combine population and offspring
-        population = parents + offspring
-        fitness = [evaluate_configuration(ser, chromo) for chromo in population]
-        
-        # Track best configuration
-        best_index = fitness.index(max(fitness))
-        best_config = population[best_index]
-        best_score = fitness[best_index]
-        
-        print(f"Best score in generation: {best_score}")
+        offspring_fitness = [evaluate_with_cache(chromo) for chromo in offspring]
+
+        # Update population
+        combined_population = parents + offspring
+        combined_fitness = [evaluate_with_cache(chromo) for chromo in combined_population]
+
+        # Select the next generation
+        sorted_indices = sorted(range(len(combined_population)), key=lambda i: combined_fitness[i], reverse=True)
+        population = [combined_population[i] for i in sorted_indices[:pop_size]]
+        fitness = [combined_fitness[i] for i in sorted_indices[:pop_size]]
+
+        # Log best configuration and score
+        best_config, best_score = population[0], fitness[0]
+        print(f"Best configuration in generation {generation + 1}: {json.dumps(best_config, indent=2)}")
+        print(f"Best score: {best_score}")
+
+        # Early stopping if no improvement
+        if generation > 5 and fitness[0] == fitness[-1]:
+            print("Early stopping due to no improvement.")
+            break
     
     return best_config, best_score
 
@@ -168,27 +196,34 @@ def measure_outputs():
         print(f"Measurement error: {e}")
         return [None] * 4
     
-# Main function
-def main():
+
+def main_with_logs():
     try:
         ser = serial.Serial(SERIAL_PORT, BAUD_RATE)
-        
-        # Run Genetic Algorithm
-        best_config, best_score = genetic_algorithm(ser)
-        
+
+        print("Starting Genetic Algorithm with logging...")
+        best_config, best_score = genetic_algorithm_with_logs(ser)
+
         print("\nOptimization Complete!")
         print(f"Best Score: {best_score}")
-        print(f"Best Configuration: {best_config}")
-        
+        print("Best Configuration:")
+        print(json.dumps(best_config, indent=2))
+
         # Save configuration
-        with open("best_configuration.json", 'w') as f:
+        with open("best_configuration_with_logs.json", 'w') as f:
             json.dump(best_config, f, indent=4)
-    
+
     except Exception as e:
         print(f"Error: {e}")
-    
+
     finally:
         ser.close()
 
+
 if __name__ == "__main__":
-    main()
+    main_with_logs()
+
+
+
+
+
