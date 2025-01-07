@@ -2,14 +2,24 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 # Updated data
+# data_corrected = {
+#     "Input_A_New": [0.1, 0.1, 4.9, 4.9],
+#     "Input_B_New": [0.1, 4.9, 0.1, 4.9],
+#     "Output1": [4.623, 1.986, 3.38, 1.692],
+#     "Output2": [1.598, 5.625, 1.273, 3.613],
+#     "Output3": [3.513, 3.553, 4.173, 3.368],
+#     "Output4": [3.402, 4.911, 3.583, 5.727],
+# }
+
 data_corrected = {
     "Input_A_New": [0.1, 0.1, 4.9, 4.9],
     "Input_B_New": [0.1, 4.9, 0.1, 4.9],
-    "Output1": [4.623, 1.986, 3.38, 1.692],
-    "Output2": [1.598, 5.625, 1.273, 3.613],
-    "Output3": [3.513, 3.553, 4.173, 3.368],
-    "Output4": [3.402, 4.911, 3.583, 5.727],
+    "Output1": [4.995, 3.302, 1.733, 1.71],
+    "Output2": [2.462, 4.354, 2.859, 4.468],
+    "Output3": [2.897, 3.603, 6.3, 4.033],
+    "Output4": [2.132, 3.479, 2.371, 6.01]
 }
+
 
 # Create DataFrame
 df_corrected = pd.DataFrame(data_corrected)
@@ -25,7 +35,7 @@ def dynamic_plot(fig_width, fig_height):
     ]
 
     # Adjust font size based on figure dimensions
-    base_fontsize = max(8, min(fig_width, fig_height) * 1.5)
+    base_fontsize = max(18, min(fig_width, fig_height) * 1.5)
 
     for i, ax in enumerate(axs.flatten()):
         outputs = [df_corrected.loc[i, "Output1"], df_corrected.loc[i, "Output2"], 
@@ -41,6 +51,8 @@ def dynamic_plot(fig_width, fig_height):
     # Adjust layout dynamically
     plt.tight_layout(rect=[0, 0, 1, 0.95])  # Ensure labels and titles stay in position
     #plt.suptitle("Output Values for Each Input Combination", fontsize=base_fontsize * 1.2)
+    
+    plt.savefig('test.png',dpi=300)
     plt.show()
 
 # Call the function with your desired figure size

@@ -4,7 +4,7 @@ import pyvisa
 import json
 import random
 
-# Serial port configuration
+# Serial port configuration 
 SERIAL_PORT = 'COM4'
 BAUD_RATE = 9600
 

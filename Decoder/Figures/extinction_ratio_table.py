@@ -40,8 +40,8 @@ def normalize_and_calculate_er(data):
         outputs_sorted = sorted(outputs, reverse=True)
         P_second_max = outputs_sorted[1]
         
-        # Calculate normalized values relative to P_max
-        normalized = [10 * np.log10(P / P_max) if P > 0 else -np.inf for P in outputs]
+        # Calculate normalized values as the difference from P_max
+        normalized = [P - P_max for P in outputs]
         
         # Calculate extinction ratio based on dominant and second-highest outputs
         ER = 10 * np.log10(P_max / P_second_max) if P_second_max > 0 else np.inf
