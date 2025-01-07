@@ -11,15 +11,15 @@ SERIAL_PORT = 'COM4'
 BAUD_RATE = 9600
 
 # Genetic Algorithm Parameters
-POPULATION_SIZE = 10
-NUM_GENERATIONS = 10
-MUTATION_RATE = 0.1
+POPULATION_SIZE = 15
+NUM_GENERATIONS = 30     
+MUTATION_RATE = 0.15
 CROSSOVER_RATE = 0.8    
-ELITE_SIZE = 2
+ELITE_SIZE = 3
 
 class HeaterGA:
     def __init__(self):
-        self.voltage_options = [0.1, 2.5, 4.9]
+        self.voltage_options = [0.1, 1.0, 2.0, 3.0, 4.0, 4.9]
         self.fixed_first_layer = list(range(33, 40))
         self.input_heaters = [36, 37]
         self.input_combinations = [(0.1, 0.1), (0.1, 4.9), (4.9, 0.1), (4.9, 4.9)]

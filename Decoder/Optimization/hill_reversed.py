@@ -4,6 +4,8 @@ import pyvisa
 import json
 import random
 
+#Currently using input port 8
+#Output ports 5,6,7,8
 
 # Apparently forward Hill is better.
 
