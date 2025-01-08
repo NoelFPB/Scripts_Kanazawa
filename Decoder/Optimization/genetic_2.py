@@ -6,8 +6,6 @@ import random
 from functools import lru_cache
 from typing import Dict, List, Tuple, Optional
 
-#This one is the onet that has worked best
-
 # Enhanced Constants
 SERIAL_PORT = 'COM4'
 BAUD_RATE = 9600
@@ -60,7 +58,7 @@ class HardwareInterface:
         voltage_message = "".join(f"{h},{v};" for h, v in config.items()) + '\n'
         self.ser.write(voltage_message.encode())
         self.ser.flush()
-        time.sleep(2)  # Reduced delay
+        time.sleep(2)  # Reduced delay 
         self.ser.reset_input_buffer()
         self.ser.reset_output_buffer()
     
@@ -305,7 +303,6 @@ def main():
         print(f"Error: {e}")
     finally:
         hardware.cleanup()
-
 
 if __name__ == "__main__":
     main()
