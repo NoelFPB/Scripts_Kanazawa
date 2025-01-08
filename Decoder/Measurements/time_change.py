@@ -6,27 +6,34 @@ import json
 import keyboard
 import os
 import csv
+# This script doesnt work as it should, but by changing the trigger one can get the image on the scope
+# and then take a screenshot
 
 # Serial port configuration
 SERIAL_PORT = 'COM4'
 BAUD_RATE = 9600
 
-def configure_trigger(scope, trigger_channel='CHANnel1', trigger_level=2.5):
+def configure_trigger(scope, trigger_channel='CHANnel1', trigger_level=2.0):
     """
-    Configure scope with working trigger settings
+    Configure scope with single-shot trigger settings for voltage step capture
     """
-    # Basic trigger setup without RMT commands
+    # Stop acquisition first
+    scope.write(":STOP")
+    
+    # Configure trigger settings
+    scope.write(":TRIGger:MODE EDGE")
     scope.write(f":TRIGger:EDGE:SOURce {trigger_channel}")
-    scope.write(f":TRIGger:EDGE:LEVel {trigger_level}")
-    scope.write(":TRIGger:EDGE:SLOPe POSitive")
-    scope.write(":TRIGger:MODE SLOPe")
-
-
-def set_timebase(scope, time_per_div):
-    """
-    Set timebase with simpler settings
-    """
-    scope.write(f":TIMebase:SCALe {time_per_div}")
+    scope.write(f":TRIGger:EDGE:LEVel {trigger_level}")  # Trigger at 2V
+    scope.write(":TRIGger:EDGE:SLOPe POSitive")  # Trigger on rising edge
+    scope.write(":TRIGger:SWEep SINGLE")  # Set to single trigger mode
+    
+    # Verify trigger settings
+    source = scope.query(":TRIGger:EDGE:SOURce?").strip()
+    level = scope.query(":TRIGger:EDGE:LEVel?").strip()
+    print(f"Trigger configured - Source: {source}, Level: {level}V")
+    
+    # Start acquisition
+    scope.write(":RUN")
 
 def init_hardware():
     rm = pyvisa.ResourceManager()
@@ -42,10 +49,16 @@ def init_hardware():
         scope.write(f':{channel}:DISPlay ON')
         scope.write(f':{channel}:SCALe 2')
         scope.write(f':{channel}:OFFSet -6')
-        scope.write(f':{channel}:COUPling DC')
 
-    # Set up scope for continuous running
-    scope.write(":RUN")
+    # Set memory depth to maximum available
+    scope.write(":ACQuire:MDEPth AUTO")  # Use maximum available memory
+    
+    # Set timebase for fast edge capture (100µs/div for edge detail)
+    scope.write(":TIMebase:SCALe 0.00002")  # 100µs per division = 1ms total window
+    scope.write(":TIMebase:POSition -0.00005")  # Show 200µs of pre-trigger data
+    
+    # Set trigger mode to single
+    scope.write(":TRIGger:SWEep SINGLE")
     
     # Initialize serial connection
     ser = serial.Serial(SERIAL_PORT, BAUD_RATE)
@@ -53,106 +66,76 @@ def init_hardware():
     
     return scope, ser
 
-
 def send_heater_values(ser, heater_values):
     voltage_message = "".join(f"{heater},{value};" for heater, value in heater_values.items()) + '\n'
     ser.write(voltage_message.encode())
     ser.flush()
     ser.reset_input_buffer()
     ser.reset_output_buffer()
-    #time.sleep(2.5)
 
 def save_waveform(scope, channels, filename):
     try:
         with open(filename, 'w', newline='') as csvfile:
             csv_writer = csv.writer(csvfile)
             csv_writer.writerow(["Channel", "Time (s)", "Voltage (V)"])
+            
             for channel in channels:
+                # Set source channel
                 scope.write(f":WAVeform:SOURce {channel}")
                 scope.write(":WAVeform:FORMat ASCii")
+                
+                # Get memory depth info
+                actual_points = int(scope.query(":WAVeform:POINts?"))
+                print(f"Number of points for {channel}: {actual_points}")
+                
+                # Get waveform data
                 data = scope.query(":WAVeform:DATA?")
+                
+                # Get time parameters
                 time_step = float(scope.query(":WAVeform:XINCrement?"))
                 time_offset = float(scope.query(":WAVeform:XORigin?"))
+                time_reference = float(scope.query(":WAVeform:XREFerence?"))
+                
+                # Convert data to voltages
                 voltages = [float(v) for v in data.split(",")]
-                times = [time_offset + i * time_step for i in range(len(voltages))]
+                
+                # Generate time values centered around trigger
+                times = [(i - time_reference) * time_step + time_offset 
+                        for i in range(len(voltages))]
+                
+                # Write data to CSV
                 for t, v in zip(times, voltages):
-                    csv_writer.writerow([channel, t, v])
+                    # Save points within ±500µs window to see edge detail
+                    if -0.0005 <= t <= 0.0005:
+                        csv_writer.writerow([channel, t, v])
+                        
         print(f"Waveform saved: {filename}")
+        print(f"Capture window: {min(times):.6f}s to {max(times):.6f}s")
         
     except Exception as e:
         print(f"Error saving waveform: {e}")
 
-def capture_screenshot(scope, filename):
-    try:
-        # Set longer timeout for image transfer
-        original_timeout = scope.timeout
-        scope.timeout = 30000
-        
-        # Capture the display data
-        scope.write(':DISPLAY:DATA? PNG')
-        image_data = scope.read_raw()
-        
-        # Look for PNG signature
-        png_start = image_data.find(b'\x89PNG')
-        if png_start >= 0:
-            with open(filename, 'wb') as f:
-                f.write(image_data[png_start:])
-            print(f"Screenshot saved: {filename}")
-            return True
-        else:
-            print("No valid PNG data found in scope response")
-            return False
-            
-    except Exception as e:
-        print(f"Error saving screenshot: {e}")
-        return False
-    finally:
-        scope.timeout = original_timeout   
-def start_record(scope):
-    """Start the scope's record function"""
-    try:
-        #scope.write(":RUN")
-        scope.write(":RECord:WRECord:ENABle ON")  # Enable record
-        scope.write(":RECord:WRECord:OPERate RUN")  # Start recording
-        print("Recording started")
-    except Exception as e:
-        print(f"Error starting record: {e}")
-
-def stop_record(scope):
-    """Stop the scope's record function"""
-    try:
-        
-        #scope.write(":RECord:OPERate STOP")  # Disable record
-        scope.write(":RECord:WRECord:OPERate STOP")  # Start recording
-        
-        print("Recording stopped")
-    except Exception as e:
-        print(f"Error stopping record: {e}")
 
 def set_and_capture(scope, ser, heater_values, input_a, input_b, channels, save_dir=r"C:\Users\noelp\Documents\Kanazawa\captures"):
     try:
- 
         # Set new heater values
         heater_values[36], heater_values[37] = input_a, input_b
         send_heater_values(ser, heater_values)
         
-        # Wait for the change to occur (around 1.4 seconds)
+        # Force trigger to ready state
+        scope.write(":TFORce")
+        # Wait for the change to occur
         time.sleep(1.5)  
-        # Start recording
-        start_record(scope)
-       
-        # Stop recording
-        #stop_record(scope)
         
-        # Save the recorded data
+        # Save the data
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         save_waveform(scope, channels, os.path.join(save_dir, f"waveform_{timestamp}.csv"))
-        capture_screenshot(scope, os.path.join(save_dir, f"screenshot_{timestamp}.png"))
         
         print(f"Captured data for Input A: {input_a}, Input B: {input_b}")
         
     except Exception as e:
         print(f"Error during set and capture: {e}")
+
 def print_help():
     print("\nControls:")
     print("1: Set Input A,B to 0,0 (0.1V, 0.1V)")
@@ -178,13 +161,11 @@ def main():
         print_help()
         channels = ['CHANnel1', 'CHANnel2', 'CHANnel3', 'CHANnel4']
         
-        # Configure basic trigger for each channel
-        for channel in channels:
-            configure_trigger(scope, channel)
-        set_timebase(scope, 0.01)
-
-        # Ensure scope is running
-        scope.write(":RUN")
+        # Configure trigger for channel 1
+        configure_trigger(scope, 'CHANnel2', trigger_level=4)
+        
+        # Force trigger to ready state
+        scope.write(":TFORce")
 
         while True:
             if keyboard.is_pressed('1'):
@@ -205,7 +186,6 @@ def main():
     except Exception as e:
         print(f"Error: {str(e)}")
     finally:
-        # Ensure scope is running before closing
         if 'scope' in locals():
             scope.write(":RUN")
             scope.close()
