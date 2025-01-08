@@ -3,7 +3,7 @@ import time
 import pyvisa
 import json
 import random
-
+# Works better than hill reversed
 # Serial port configuration 
 SERIAL_PORT = 'COM4'
 BAUD_RATE = 9600

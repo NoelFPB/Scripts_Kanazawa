@@ -6,6 +6,8 @@ import random
 from functools import lru_cache
 from typing import Dict, List, Tuple, Optional
 
+#This one is the onet that has worked best
+
 # Enhanced Constants
 SERIAL_PORT = 'COM4'
 BAUD_RATE = 9600
@@ -115,7 +117,6 @@ class GeneticOptimizer:
         separation = max_output - max(v for i, v in enumerate(outputs) if i != actual_highest)
         return min(separation * 5, 10)
     
-<<<<<<< HEAD
     def evaluate_configuration(self, config: Dict[str, float]) -> float:
         """Evaluate full configuration"""
         config_str = json.dumps(config, sort_keys=True)
@@ -130,99 +131,6 @@ class GeneticOptimizer:
         tournament_fitness = [fitness[i] for i in tournament_idx]
         winner_idx = tournament_idx[tournament_fitness.index(max(tournament_fitness))]
         return population[winner_idx].copy()
-=======
-    return total_score
-
-# Selection
-def select_parents(population, fitness, num_parents):
-    """Select parents using roulette wheel selection."""
-    total_fitness = sum(fitness)
-    probabilities = [f / total_fitness for f in fitness]
-    parents = random.choices(population, probabilities, k=num_parents)
-    return parents
-
-# Crossover
-def crossover(parent1, parent2):
-    """Perform crossover between two parents."""
-    crossover_point = random.randint(1, len(modifiable_heaters) - 1)
-    child1 = {**{k: parent1[k] for k in list(parent1)[:crossover_point]},
-              **{k: parent2[k] for k in list(parent2)[crossover_point:]}}
-    child2 = {**{k: parent2[k] for k in list(parent2)[:crossover_point]},
-              **{k: parent1[k] for k in list(parent1)[crossover_point:]}}
-    return child1, child2
-
-# Mutation
-def mutate(chromo, mutation_rate):
-    """Mutate a chromosome."""
-    for heater in modifiable_heaters:
-        if random.random() < mutation_rate:
-            chromo[str(heater)] = random.choice(voltage_options)
-    return chromo
-
-def select_parents_tournament(population, fitness, num_parents, tournament_size=3):
-    parents = []
-    for _ in range(num_parents):
-        competitors = random.sample(list(zip(population, fitness)), tournament_size)
-        winner = max(competitors, key=lambda x: x[1])
-        parents.append(winner[0])
-    return parents
-
-
-# GA main loop
-def genetic_algorithm_with_logs(ser, pop_size=10, generations=30, mutation_rate=0.05):
-    """Run the Genetic Algorithm with optimizations."""
-    population = initialize_population(pop_size)
-    fitness_cache = {}
-    
-    def evaluate_with_cache(config):
-        config_tuple = tuple(sorted(config.items()))
-        if config_tuple in fitness_cache:
-            return fitness_cache[config_tuple]
-        fitness = evaluate_configuration(ser, config)
-        fitness_cache[config_tuple] = fitness
-        return fitness
-    
-    fitness = [evaluate_with_cache(chromo) for chromo in population]
-    
-    for generation in range(generations):
-        print(f"\n===== Generation {generation + 1}/{generations} =====")
-
-        # Select parents
-        parents = select_parents_tournament(population, fitness, pop_size // 2)
-        
-        # Generate offspring
-        offspring = []
-        for i in range(0, len(parents), 2):
-            if i + 1 < len(parents):
-                parent1, parent2 = parents[i], parents[i + 1]
-                child1, child2 = crossover(parent1, parent2)
-                offspring.extend([child1, child2])
-
-        # Mutate offspring
-        offspring = [mutate(chromo, mutation_rate) for chromo in offspring]
-
-        # Evaluate offspring fitness
-        offspring_fitness = [evaluate_with_cache(chromo) for chromo in offspring]
-
-        # Update population
-        combined_population = parents + offspring
-        combined_fitness = [evaluate_with_cache(chromo) for chromo in combined_population]
-
-        # Select the next generation
-        sorted_indices = sorted(range(len(combined_population)), key=lambda i: combined_fitness[i], reverse=True)
-        population = [combined_population[i] for i in sorted_indices[:pop_size]]
-        fitness = [combined_fitness[i] for i in sorted_indices[:pop_size]]
-
-        # Log best configuration and score
-        best_config, best_score = population[0], fitness[0]
-        print(f"Best configuration in generation {generation + 1}: {json.dumps(best_config, indent=2)}")
-        print(f"Best score: {best_score}")
-
-        # Early stopping if no improvement
-        if generation > 5 and fitness[0] == fitness[-1]:
-            print("Early stopping due to no improvement.")
-            break
->>>>>>> 4efc5e5393615a789086e0ee62e4b82931a736bd
     
     def adaptive_crossover(self, parent1: Dict[str, float], 
                           parent2: Dict[str, float],
@@ -248,7 +156,6 @@ def genetic_algorithm_with_logs(ser, pop_size=10, generations=30, mutation_rate=
         
         return child1, child2
     
-<<<<<<< HEAD
     def adaptive_mutation(self, config: Dict[str, float], 
                          rate: float, 
                          generation: int) -> Dict[str, float]:
@@ -396,40 +303,9 @@ def main():
             
     except Exception as e:
         print(f"Error: {e}")
-=======
-
-def main_with_logs():
-    try:
-        ser = serial.Serial(SERIAL_PORT, BAUD_RATE)
-
-        print("Starting Genetic Algorithm with logging...")
-        best_config, best_score = genetic_algorithm_with_logs(ser)
-
-        print("\nOptimization Complete!")
-        print(f"Best Score: {best_score}")
-        print("Best Configuration:")
-        print(json.dumps(best_config, indent=2))
-
-        # Save configuration
-        with open("best_configuration_with_logs.json", 'w') as f:
-            json.dump(best_config, f, indent=4)
-
-    except Exception as e:
-        print(f"Error: {e}")
-
->>>>>>> 4efc5e5393615a789086e0ee62e4b82931a736bd
     finally:
         hardware.cleanup()
 
 
 if __name__ == "__main__":
-<<<<<<< HEAD
     main()
-=======
-    main_with_logs()
-
-
-
-
-
->>>>>>> 4efc5e5393615a789086e0ee62e4b82931a736bd
