@@ -175,8 +175,8 @@ def main():
     # Initialize controllers
     oscilloscope = OscilloscopeController()
     data_processor = DataProcessor(
-        csv_path='C:\\Users\\noelp\\Documents\\Kanazawa\\Scripts_Kanazawa\\MSI\\iris2.csv',
-        output_path='C:\\Users\\noelp\\Documents\\Kanazawa\\Scripts_Kanazawa\\MSI\\large_scale.csv'
+        csv_path='C:\\Users\\noelp\\Documents\\Kanazawa\\Scripts_Kanazawa\\MSE\\iris2.csv',
+        output_path='C:\\Users\\noelp\\Documents\\Kanazawa\\Scripts_Kanazawa\\MSE\\large_scale.csv'
     )
     serial_controller = SerialController()
     
