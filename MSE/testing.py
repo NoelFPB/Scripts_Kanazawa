@@ -1,10 +1,15 @@
 import numpy as np
 import time
+import csv
 import pyvisa as visa
 import serial
 import pandas as pd
 from sklearn.model_selection import train_test_split
 import random
+
+
+# This script is for testing a specific configuration after it is found
+# It can generate the confusion matrix
 
 class ConfigurationManager:
     """Manages configuration generation and validation"""
@@ -46,7 +51,7 @@ class ConfigurationManager:
 
 class OscilloscopeController:
     def __init__(self):
-        self.channels = ['CHANnel1', 'CHANnel2', 'CHANnel3']
+        self.channels = ['CHANnel1', 'CHANnel2', 'CHANnel3', 'CHANnel4']
         self.scope = None
 
     def connect_oscilloscope(self):
@@ -82,8 +87,9 @@ class OscilloscopeController:
             return [None] * 3
 
 class DataProcessor:
-    def __init__(self, csv_path, ):
+    def __init__(self, csv_path, output_path):
         self.csv_path = csv_path
+        self.output_path = output_path
         self.df = None
         self.target = []
         self.train_indices = None
@@ -141,7 +147,7 @@ class SerialController:
         self.ser.flush()
         self.ser.reset_input_buffer()
         self.ser.reset_output_buffer()
-        time.sleep(2)
+        time.sleep(0.001)
 
     def train(self, config_manager, data_processor, oscilloscope, population_size=10, generations=5, mutation_rate=0.1):
         """Training phase using genetic algorithm to find optimal configurations"""
@@ -172,6 +178,7 @@ class SerialController:
                     
                     # Send combined configuration once
                     self.send_heater_values(combined_config)
+                    time.sleep(2)
                         # Measure outputs
                     outputs = oscilloscope.measure_outputs()
                     if outputs[0] is not None:
@@ -246,11 +253,75 @@ class SerialController:
         avg_test_mse = np.mean(test_mse)
         print(f"\nOverall Test MSE: {avg_test_mse:.5f}")
 
+
+    def test_fixed_configuration(self, data_processor, oscilloscope, config_manager):
+        """Testing phase using a pre-defined heater configuration and specific test indices"""
+        print("\nStarting Testing with Fixed Configuration...")
+        
+        # Your exact test indices from the previous run
+        test_indices = [73, 18, 118, 78, 76, 31, 64, 141, 68, 82, 110, 12, 36, 9, 19, 
+                        56, 104, 69, 55, 132, 29, 127, 26, 128, 131, 145, 108, 143, 45, 
+                        30, 22, 15, 65, 11, 42, 146, 51, 27, 4, 32, 142, 85, 86, 16, 10]
+        
+        # Your best heater configuration
+        best_config = {34: 4.9, 33: 1.0, 32: 2.0, 31: 3.0, 30: 0.1, 29: 1.0, 28: 2.0, 
+                    27: 1.0, 26: 1.0, 25: 4.9, 24: 3.0, 23: 4.9, 22: 2.0, 21: 0.1, 
+                    20: 3.0, 19: 1.0, 18: 1.0, 17: 4.9, 16: 4.9, 15: 1.0, 14: 3.0, 
+                    13: 2.0, 12: 0.1, 11: 2.0, 10: 1.0, 9: 4.0, 8: 0.1, 7: 4.9, 
+                    6: 0.1, 5: 4.9, 4: 0.1, 3: 3.0, 2: 4.9, 1: 1.0, 0: 0.1}
+        
+        # Initialize confusion matrix
+        confusion_matrix = np.zeros((3, 3), dtype=int)
+        classes = ["Iris-setosa", "Iris-versicolor", "Iris-virginica"]
+        
+        # Test using exactly the same test samples
+        for sample_id in test_indices:
+            # Set input configuration
+            iris_data = data_processor.df.iloc[sample_id]
+            input_config = config_manager.generate_input_config(iris_data)
+            
+            # Get actual class
+            actual_class = classes.index(iris_data['Species'])
+            
+            # Send combined configuration
+            combined_config = {**best_config, **input_config}
+            self.send_heater_values(combined_config)
+            time.sleep(2)
+            
+            # Measure outputs
+            outputs = oscilloscope.measure_outputs()
+            if outputs[0] is not None:
+                # Normalize outputs to get probabilities
+                outputs_array = np.array(outputs)
+                output_probs = outputs_array / np.sum(outputs_array)
+                
+                # Get predicted class
+                predicted_class = np.argmax(output_probs)
+                
+                # Update confusion matrix
+                confusion_matrix[actual_class][predicted_class] += 1
+                
+                print(f"Sample {sample_id} - True: {classes[actual_class]}, Predicted: {classes[predicted_class]}")
+        
+        # Print confusion matrix
+        print("\nConfusion Matrix:")
+        print("Predicted →")
+        print("Actual ↓")
+        print("            Setosa  Versicolor  Virginica")
+        for i, actual in enumerate(classes):
+            print(f"{actual:12} {confusion_matrix[i][0]:7d} {confusion_matrix[i][1]:11d} {confusion_matrix[i][2]:9d}")
+        
+        # Calculate accuracy
+        accuracy = np.trace(confusion_matrix) / np.sum(confusion_matrix)
+        print(f"\nOverall Accuracy: {accuracy:.2%}")
+
 def main():
     oscilloscope = OscilloscopeController()
     config_manager = ConfigurationManager()
     data_processor = DataProcessor(
-        csv_path='C:\\Users\\noelp\\Documents\\Kanazawa\\Scripts_Kanazawa\\MSE\\iris2.csv' )
+        csv_path='C:\\Users\\noelp\\Documents\\Kanazawa\\Scripts_Kanazawa\\MSE\\iris2.csv',
+        output_path='C:\\Users\\noelp\\Documents\\Kanazawa\\Scripts_Kanazawa\\MSE\\large_scale.csv'
+    )
     serial_controller = SerialController()
 
     # Setup connections
@@ -261,21 +332,11 @@ def main():
         print("Failed to connect to serial port")
         return
 
-    # Load data and create train/test split
+    # Load data
     data_processor.load_data()
     
-    # Training phase
-    serial_controller.train(
-        config_manager=config_manager,
-        data_processor=data_processor,
-        oscilloscope=oscilloscope,
-        population_size=10,
-        generations=5,
-        mutation_rate=0.1
-    )
-    
-    # Testing phase
-    serial_controller.test(
+    # Run testing with fixed configuration
+    serial_controller.test_fixed_configuration(
         data_processor=data_processor,
         oscilloscope=oscilloscope,
         config_manager=config_manager
