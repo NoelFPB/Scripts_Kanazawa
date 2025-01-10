@@ -82,7 +82,7 @@ class OscilloscopeController:
             return [None] * 3
 
 class DataProcessor:
-    def __init__(self, csv_path, ):
+    def __init__(self, csv_path):
         self.csv_path = csv_path
         self.df = None
         self.target = []
@@ -111,13 +111,19 @@ class DataProcessor:
                 self.target.append([0, 0, 1])
 
     def calculate_mse(self, real1, real2, real3, number):
-        """Calculate Mean Squared Error for outputs"""
+        """Calculate error based on whether the highest output matches the target class"""
         target = self.target[number]
         real = np.array([real1, real2, real3])
-        ratio = real / np.sum(real)
-        mse = (np.sum((target - ratio)**2) / 3)
-        return round(mse, 5)
-
+        
+        # Find the index of the maximum value in both arrays
+        predicted_class = np.argmax(real)
+        true_class = np.argmax(target)
+        
+        # Return 0 if the prediction is correct, 1 if incorrect
+        error = 0 if predicted_class == true_class else 1
+        
+        return error
+    
 class SerialController:
     def __init__(self, port='COM4', baudrate=9600):
         self.port = port
@@ -177,11 +183,11 @@ class SerialController:
                     if outputs[0] is not None:
                         mse = data_processor.calculate_mse(*outputs, sample_id)
                         generation_mse.append(mse)
-                        print(f"Sample {sample_id} MSE: {mse:.5f}")
+                        print(f"Sample {sample_id} Result: {mse:.5f}")
                 
                 avg_mse = np.mean(generation_mse) if generation_mse else float('inf')
                 fitness.append((config, avg_mse))
-                print(f"Configuration average MSE: {avg_mse:.5f}")
+                print(f"Configuration average (closer to 0 is more accurate): {avg_mse:.5f}")
             
             # Update best configurations
             fitness.sort(key=lambda x: x[1])

@@ -183,7 +183,7 @@ class SerialController:
         
         self.best_configuration = current_config.copy()
         self.best_mse = current_mse
-        
+         
         print(f"Initial MSE: {current_mse:.5f}")
         
         for iteration in range(iterations):
