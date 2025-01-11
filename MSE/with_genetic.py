@@ -6,6 +6,11 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 import random
 
+
+# Need to be careful with the modification of the Id substracting one now, remember to check it on the testing phase
+# Altough I already modified the testing script
+
+
 class ConfigurationManager:
     """Manages configuration generation and validation"""
     def __init__(self):
@@ -95,7 +100,7 @@ class DataProcessor:
         self._create_target_encoding()
         # Create and store the train/test split
         self.train_indices, self.test_indices = train_test_split(
-            self.df['Id'], 
+            self.df['Id'].apply(lambda x: x - 1), 
             test_size=0.3, 
             random_state=42
         )
@@ -256,7 +261,7 @@ def main():
     oscilloscope = OscilloscopeController()
     config_manager = ConfigurationManager()
     data_processor = DataProcessor(
-        csv_path='C:\\Users\\noelp\\Documents\\Kanazawa\\Scripts_Kanazawa\\MSE\\Dataset\\iris_normalized.csv' )
+        csv_path='C:\\Users\\noelp\\Documents\\Kanazawa\\Scripts_Kanazawa\\MSE\\Datasets\\iris_normalized.csv' )
     serial_controller = SerialController()
 
     # Setup connections

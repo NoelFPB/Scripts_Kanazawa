@@ -100,7 +100,7 @@ class DataProcessor:
         self._create_target_encoding()
         # Create and store the train/test split
         self.train_indices, self.test_indices = train_test_split(
-            self.df['Id'], 
+            self.df['Id'].apply(lambda x: x - 1), 
             test_size=0.3, 
             random_state=42
         )
