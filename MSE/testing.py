@@ -51,7 +51,7 @@ class ConfigurationManager:
 
 class OscilloscopeController:
     def __init__(self):
-        self.channels = ['CHANnel1', 'CHANnel2', 'CHANnel3', 'CHANnel4']
+        self.channels = ['CHANnel1', 'CHANnel2', 'CHANnel3']
         self.scope = None
 
     def connect_oscilloscope(self):
@@ -87,9 +87,8 @@ class OscilloscopeController:
             return [None] * 3
 
 class DataProcessor:
-    def __init__(self, csv_path, output_path):
+    def __init__(self, csv_path):
         self.csv_path = csv_path
-        self.output_path = output_path
         self.df = None
         self.target = []
         self.train_indices = None
@@ -320,9 +319,7 @@ def main():
     oscilloscope = OscilloscopeController()
     config_manager = ConfigurationManager()
     data_processor = DataProcessor(
-        csv_path='C:\\Users\\noelp\\Documents\\Kanazawa\\Scripts_Kanazawa\\MSE\\iris2.csv',
-        output_path='C:\\Users\\noelp\\Documents\\Kanazawa\\Scripts_Kanazawa\\MSE\\large_scale.csv'
-    )
+        csv_path='C:\\Users\\noelp\\Documents\\Kanazawa\\Scripts_Kanazawa\\MSE\\Datasets\\iris_normalized.csv')
     serial_controller = SerialController()
 
     # Setup connections

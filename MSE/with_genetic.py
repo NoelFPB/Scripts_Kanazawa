@@ -256,7 +256,7 @@ def main():
     oscilloscope = OscilloscopeController()
     config_manager = ConfigurationManager()
     data_processor = DataProcessor(
-        csv_path='C:\\Users\\noelp\\Documents\\Kanazawa\\Scripts_Kanazawa\\MSE\\iris2.csv' )
+        csv_path='C:\\Users\\noelp\\Documents\\Kanazawa\\Scripts_Kanazawa\\MSE\\Dataset\\iris_normalized.csv' )
     serial_controller = SerialController()
 
     # Setup connections
@@ -275,8 +275,8 @@ def main():
         config_manager=config_manager,
         data_processor=data_processor,
         oscilloscope=oscilloscope,
-        population_size=20,
-        generations=10,
+        population_size=14,
+        generations=7,
         mutation_rate=0.1
     )
     
