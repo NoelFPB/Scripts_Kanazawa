@@ -275,8 +275,8 @@ def main():
         config_manager=config_manager,
         data_processor=data_processor,
         oscilloscope=oscilloscope,
-        population_size=10,
-        generations=5,
+        population_size=20,
+        generations=10,
         mutation_rate=0.1
     )
     
