@@ -235,6 +235,7 @@ class SerialController:
             self.send_heater_values(input_config)
             time.sleep(2)
             
+            # I should merge them like in train.
             # Apply best configuration
             self.send_heater_values(best_config)
             time.sleep(2)
