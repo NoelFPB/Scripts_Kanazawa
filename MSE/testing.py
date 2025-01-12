@@ -294,6 +294,7 @@ class SerialController:
             
             # Measure outputs
             outputs = oscilloscope.measure_outputs()
+            print(outputs)
             if outputs[0] is not None:
                 # Normalize outputs to get probabilities
                 outputs_array = np.array(outputs)

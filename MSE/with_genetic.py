@@ -16,8 +16,7 @@ class ConfigurationManager:
     def __init__(self):
         self.modifiable_heaters = sorted([i for i in range(35)], reverse=True)
         self.fixed_inputs = list(range(36, 40))
-        self.voltage_options = [0.1, 1.0, 2.0, 3.0, 4.0, 4.9]  # Expanded voltage options
-
+        self.voltage_options = [0.1, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 4.9]
     def generate_random_config(self):
         """Generate a random configuration with diverse voltage settings"""
         config = {
@@ -120,13 +119,13 @@ class DataProcessor:
         target = self.target[number]
         real = np.array([real1, real2, real3])
         
-        # Find the index of the maximum value in both arrays
-        predicted_class = np.argmax(real)
-        true_class = np.argmax(target)
+        predicted_class = np.argmax(real)  # Index of highest voltage
+        true_class = np.argmax(target)     # Index of target class (0 for setosa)
         
-        # Return 0 if the prediction is correct, 1 if incorrect
-        error = 0 if predicted_class == true_class else 1
+        # Add higher weight for setosa misclassification
+        weight = 2.0 if target[0] == 1 else 1.0  # Double penalty for setosa errors
         
+        error = 0 if predicted_class == true_class else (1 * weight)
         return error
     
 class SerialController:
