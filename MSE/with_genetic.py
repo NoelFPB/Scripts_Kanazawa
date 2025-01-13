@@ -119,13 +119,13 @@ class DataProcessor:
         target = self.target[number]
         real = np.array([real1, real2, real3])
         
-        predicted_class = np.argmax(real)  # Index of highest voltage
-        true_class = np.argmax(target)     # Index of target class (0 for setosa)
+        # Find the index of the maximum value in both arrays
+        predicted_class = np.argmax(real)
+        true_class = np.argmax(target)
         
-        # Add higher weight for setosa misclassification
-        weight = 2.0 if target[0] == 1 else 1.0  # Double penalty for setosa errors
+        # Return 0 if the prediction is correct, 1 if incorrect
+        error = 0 if predicted_class == true_class else 1
         
-        error = 0 if predicted_class == true_class else (1 * weight)
         return error
     
 class SerialController:
@@ -233,28 +233,51 @@ class SerialController:
         best_config = self.best_configurations[0][0]
         print(f"\nTesting best configuration:")
         print(f"Configuration: {best_config}")
+        confusion_matrix = np.zeros((3, 3), dtype=int)
+        classes = ["Iris-setosa", "Iris-versicolor", "Iris-virginica"]
         
-        test_mse = []
+        # Test using exactly the same test samples
         for sample_id in test_data:
             # Set input configuration
             iris_data = data_processor.df.iloc[sample_id]
             input_config = config_manager.generate_input_config(iris_data)
-            self.send_heater_values(input_config)
+            
+            # Get actual class
+            actual_class = classes.index(iris_data['Species'])
+            
+            # Send combined configuration
+            combined_config = {**best_config, **input_config}
+            self.send_heater_values(combined_config)
             time.sleep(2)
             
-            # Apply best configuration
-            self.send_heater_values(best_config)
-            time.sleep(2)
-            
-            # Measure and calculate MSE
+            # Measure outputs
             outputs = oscilloscope.measure_outputs()
+            print(outputs)
             if outputs[0] is not None:
-                mse = data_processor.calculate_mse(*outputs, sample_id)
-                test_mse.append(mse)
-                print(f"Test sample {sample_id} MSE: {mse:.5f}")
+                # Normalize outputs to get probabilities
+                outputs_array = np.array(outputs)
+                output_probs = outputs_array / np.sum(outputs_array)
+                
+                # Get predicted class
+                predicted_class = np.argmax(output_probs)
+                
+                # Update confusion matrix
+                confusion_matrix[actual_class][predicted_class] += 1
+                
+                print(f"Sample {sample_id} - True: {classes[actual_class]}, Predicted: {classes[predicted_class]}")
         
-        avg_test_mse = np.mean(test_mse)
-        print(f"\nOverall Test MSE: {avg_test_mse:.5f}")
+        # Print confusion matrix
+        print("\nConfusion Matrix:")
+        print("Predicted →")
+        print("Actual ↓")
+        print("            Setosa  Versicolor  Virginica")
+        for i, actual in enumerate(classes):
+            print(f"{actual:12} {confusion_matrix[i][0]:7d} {confusion_matrix[i][1]:11d} {confusion_matrix[i][2]:9d}")
+        
+        # Calculate accuracy
+        accuracy = np.trace(confusion_matrix) / np.sum(confusion_matrix)
+        print(f"\nOverall Accuracy: {accuracy:.2%}")
+
 
 def main():
     oscilloscope = OscilloscopeController()

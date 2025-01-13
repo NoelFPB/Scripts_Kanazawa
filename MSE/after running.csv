@@ -96,3 +96,54 @@ Test sample 85 MSE: 1.00000
 Test sample 86 MSE: 1.00000
 Test sample 16 MSE: 0.00000
 Test sample 10 MSE: 0.00000
+
+
+
+AFTER fixing normalization
+
+Configuration: {34: 0.1, 33: 1.0, 32: 2.0, 31: 2.0, 30: 2.0, 29: 4.9, 28: 2.0, 27: 2.0, 26: 0.1, 25: 4.9, 24: 3.0, 23: 3.0, 22: 4.9, 21: 3.0, 20: 0.1, 19: 3.0, 18: 1.0, 17: 2.0, 16: 1.0, 15: 4.9, 14: 4.9, 13: 0.1, 12: 3.0, 11: 0.1, 10: 4.0, 9: 0.1, 8: 1.0, 7: 2.0, 6: 1.0, 5: 0.1, 4: 2.0, 3: 3.0, 2: 4.0, 1: 1.0, 0: 3.0}
+Test sample 73 MSE: 0.00000
+Test sample 18 MSE: 1.00000
+Test sample 118 MSE: 0.00000
+Test sample 78 MSE: 0.00000
+Test sample 76 MSE: 0.00000
+Test sample 31 MSE: 1.00000
+Test sample 64 MSE: 0.00000
+Test sample 141 MSE: 0.00000
+Test sample 68 MSE: 1.00000
+Test sample 82 MSE: 0.00000
+Test sample 110 MSE: 0.00000
+Test sample 12 MSE: 1.00000
+Test sample 36 MSE: 1.00000
+Test sample 9 MSE: 1.00000
+Test sample 19 MSE: 1.00000
+Test sample 56 MSE: 0.00000
+Test sample 104 MSE: 0.00000
+Test sample 69 MSE: 0.00000
+Test sample 55 MSE: 0.00000
+Test sample 132 MSE: 0.00000
+Test sample 29 MSE: 1.00000
+Test sample 127 MSE: 0.00000
+Test sample 26 MSE: 1.00000
+Test sample 128 MSE: 0.00000
+Test sample 131 MSE: 0.00000
+Test sample 145 MSE: 0.00000
+Test sample 108 MSE: 0.00000
+Test sample 143 MSE: 0.00000
+Test sample 45 MSE: 1.00000
+Test sample 30 MSE: 1.00000
+Test sample 22 MSE: 1.00000
+Test sample 15 MSE: 1.00000
+Test sample 65 MSE: 0.00000
+Test sample 11 MSE: 1.00000
+Test sample 42 MSE: 1.00000
+Test sample 146 MSE: 0.00000
+Test sample 51 MSE: 0.00000
+Test sample 27 MSE: 1.00000
+Test sample 4 MSE: 1.00000
+Test sample 32 MSE: 1.00000
+Test sample 142 MSE: 0.00000
+Test sample 85 MSE: 0.00000
+Test sample 86 MSE: 0.00000
+Test sample 16 MSE: 1.00000
+Test sample 10 MSE: 1.00000
