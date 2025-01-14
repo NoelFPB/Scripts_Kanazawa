@@ -114,19 +114,30 @@ class DataProcessor:
             elif species == "Iris-virginica":
                 self.target.append([0, 0, 1])
 
+    # def calculate_mse(self, real1, real2, real3, number):
+    #     """Calculate error based on whether the highest output matches the target class"""
+    #     target = self.target[number]
+    #     real = np.array([real1, real2, real3])
+        
+    #     # Find the index of the maximum value in both arrays
+    #     predicted_class = np.argmax(real)
+    #     true_class = np.argmax(target)
+        
+    #     # Return 0 if the prediction is correct, 1 if incorrect
+    #     error = 0 if predicted_class == true_class else 1
+        
+    #     return error
     def calculate_mse(self, real1, real2, real3, number):
-        """Calculate error based on whether the highest output matches the target class"""
+        """Calculate error using continuous values"""
         target = self.target[number]
         real = np.array([real1, real2, real3])
         
-        # Find the index of the maximum value in both arrays
-        predicted_class = np.argmax(real)
-        true_class = np.argmax(target)
+        # Normalize the outputs
+        real_normalized = real / np.sum(real)
         
-        # Return 0 if the prediction is correct, 1 if incorrect
-        error = 0 if predicted_class == true_class else 1
-        
-        return error
+        # Calculate mean squared error between actual and target
+        mse = np.mean((np.array(target) - real_normalized) ** 2)
+        return mse
     
 class SerialController:
     def __init__(self, port='COM4', baudrate=9600):
@@ -151,7 +162,6 @@ class SerialController:
         self.ser.flush()
         self.ser.reset_input_buffer()
         self.ser.reset_output_buffer()
-        time.sleep(2)
 
     def train(self, config_manager, data_processor, oscilloscope, population_size=10, generations=5, mutation_rate=0.1):
         """Training phase using genetic algorithm to find optimal configurations"""
@@ -166,8 +176,9 @@ class SerialController:
         for generation in range(generations):
             print(f"\nGeneration {generation + 1}/{generations}:")
             fitness = []
-            
             for idx, config in enumerate(population):
+                self.send_heater_values(config)
+                time.sleep(2)
                 generation_mse = []
                 print(f"\nTesting configuration {idx + 1}/{population_size}")
                 
@@ -178,10 +189,12 @@ class SerialController:
                     input_config = config_manager.generate_input_config(iris_data)
                     
                     # Merge both configurations
-                    combined_config = {**config, **input_config}  # This combines both dictionaries
+                    #combined_config = {**config, **input_config}  # This combines both dictionaries
                     
                     # Send combined configuration once
-                    self.send_heater_values(combined_config)
+                    self.send_heater_values(input_config)
+                    time.sleep(0.3)
+
                         # Measure outputs
                     outputs = oscilloscope.measure_outputs()
                     if outputs[0] is not None:
@@ -248,7 +261,6 @@ class SerialController:
             # Send combined configuration
             combined_config = {**best_config, **input_config}
             self.send_heater_values(combined_config)
-            time.sleep(2)
             
             # Measure outputs
             outputs = oscilloscope.measure_outputs()
@@ -302,9 +314,9 @@ def main():
         config_manager=config_manager,
         data_processor=data_processor,
         oscilloscope=oscilloscope,
-        population_size=14,
-        generations=7,
-        mutation_rate=0.1
+        population_size=15,
+        generations=6,
+        mutation_rate=0.15
     )
     
     # Testing phase

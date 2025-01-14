@@ -1,149 +1,102 @@
-THIS RESULTS WERE OBTAINED USING THE WRONG NORMALIZATION. CURRENTLY NAMED IRIS2_NORMALIZATION_INCORRECT
 Testing best configuration:
-Configuration: {34: 4.9, 33: 1.0, 32: 2.0, 31: 3.0, 30: 0.1, 29: 1.0, 28: 2.0, 27: 1.0, 26: 1.0, 25: 4.9, 24: 3.0, 23: 4.9, 22: 2.0, 21: 0.1, 20: 3.0, 19: 1.0, 18: 1.0, 17: 4.9, 16: 4.9, 15: 1.0, 14: 3.0, 13: 2.0, 12: 0.1, 11: 2.0, 10: 1.0, 9: 4.0, 8: 0.1, 7: 4.9, 6: 0.1, 5: 4.9, 4: 0.1, 3: 3.0, 2: 4.9, 1: 1.0, 0: 0.1}
-Test sample 73 MSE: 0.25258
-Test sample 18 MSE: 0.19844
-Test sample 118 MSE: 0.20953
-Test sample 78 MSE: 0.25475
-Test sample 76 MSE: 0.23508
-Test sample 31 MSE: 0.21187
-Test sample 64 MSE: 0.26020
-Test sample 141 MSE: 0.17374
-Test sample 68 MSE: 0.25767
-Test sample 82 MSE: 0.26193
-Test sample 110 MSE: 0.16298
-Test sample 12 MSE: 0.22347
-Test sample 36 MSE: 0.20456
-Test sample 9 MSE: 0.22008
-Test sample 19 MSE: 0.20396
-Test sample 56 MSE: 0.25654
-Test sample 104 MSE: 0.15300
-Test sample 69 MSE: 0.26355
-Test sample 55 MSE: 0.25370
-Test sample 132 MSE: 0.14571
-Test sample 29 MSE: 0.22458
-Test sample 127 MSE: 0.15546
-Test sample 26 MSE: 0.21817
-Test sample 128 MSE: 0.15107
-Test sample 131 MSE: 0.19121
-Test sample 145 MSE: 0.16392
-Test sample 108 MSE: 0.16164
-Test sample 143 MSE: 0.16165
-Test sample 45 MSE: 0.22494
-Test sample 30 MSE: 0.23424
-Test sample 22 MSE: 0.21518
-Test sample 15 MSE: 0.17779
-Test sample 65 MSE: 0.24476
-Test sample 11 MSE: 0.22132
-Test sample 42 MSE: 0.22783
-Test sample 146 MSE: 0.15496
-Test sample 51 MSE: 0.24953
-Test sample 27 MSE: 0.21374
-Test sample 4 MSE: 0.21815
-Test sample 32 MSE: 0.19388
-Test sample 142 MSE: 0.14121
-Test sample 85 MSE: 0.25906
-Test sample 86 MSE: 0.24916
-Test sample 16 MSE: 0.19699
-Test sample 10 MSE: 0.20327
+Configuration: {34: 2.0, 33: 0.5, 32: 1.0, 31: 2.0, 30: 1.0, 29: 0.5, 28: 3.5, 27: 0.1, 26: 2.5, 25: 4.0, 24: 3.0, 23: 0.5, 22: 4.9, 21: 2.0, 20: 2.5, 19: 4.9, 18: 2.5, 17: 4.5, 16: 4.0, 15: 0.5, 14: 4.5, 13: 3.5, 12: 1.5, 11: 2.5, 10: 3.0, 9: 3.5, 8: 4.9, 7: 2.5, 6: 0.1, 5: 1.5, 4: 3.5, 3: 2.5, 2: 3.5, 1: 0.1, 0: 3.5}
+[2.325, 3.6, 2.354]
+Sample 73 - True: Iris-versicolor, Predicted: Iris-versicolor
+[4.692, 5.195, 4.368]
+Sample 18 - True: Iris-setosa, Predicted: Iris-versicolor
+[1.43, 3.019, 6.037]
+Sample 118 - True: Iris-virginica, Predicted: Iris-virginica
+[2.252, 3.782, 2.331]
+Sample 78 - True: Iris-versicolor, Predicted: Iris-versicolor
+[1.683, 4.271, 2.942]
+Sample 76 - True: Iris-versicolor, Predicted: Iris-versicolor
+[4.871, 1.886, 3.006]
+Sample 31 - True: Iris-setosa, Predicted: Iris-setosa
+[2.935, 3.462, 0.9061]
+Sample 64 - True: Iris-versicolor, Predicted: Iris-versicolor
+[1.697, 3.284, 4.345]
+Sample 141 - True: Iris-virginica, Predicted: Iris-virginica
+[1.678, 4.505, 2.612]
+Sample 68 - True: Iris-versicolor, Predicted: Iris-versicolor
+[2.577, 3.952, 0.9061]
+Sample 82 - True: Iris-versicolor, Predicted: Iris-versicolor
+[2.063, 3.092, 4.273]
+Sample 110 - True: Iris-virginica, Predicted: Iris-virginica
+[4.495, 1.451, 1.598]
+Sample 12 - True: Iris-setosa, Predicted: Iris-setosa
+[4.752, 2.379, 3.671]
+Sample 36 - True: Iris-setosa, Predicted: Iris-setosa
+[4.724, 1.301, 1.902]
+Sample 9 - True: Iris-setosa, Predicted: Iris-setosa
+[4.724, 5.19, 4.454]
+Sample 19 - True: Iris-setosa, Predicted: Iris-versicolor
+[3.486, 2.622, 2.417]
+Sample 56 - True: Iris-versicolor, Predicted: Iris-setosa
+[1.421, 3.037, 5.893]
+Sample 104 - True: Iris-virginica, Predicted: Iris-virginica
+[2.353, 4.303, 0.888]
+Sample 69 - True: Iris-versicolor, Predicted: Iris-versicolor
+[2.467, 3.49, 1.938]
+Sample 55 - True: Iris-versicolor, Predicted: Iris-versicolor
+[1.33, 2.845, 6.037]
+Sample 132 - True: Iris-virginica, Predicted: Iris-virginica
+[4.779, 1.351, 2.259]
+Sample 29 - True: Iris-setosa, Predicted: Iris-setosa
+[1.926, 3.17, 3.617]
+Sample 127 - True: Iris-virginica, Predicted: Iris-virginica
+[5.055, 1.854, 2.983]
+Sample 26 - True: Iris-setosa, Predicted: Iris-setosa
+[1.403, 2.836, 5.802]
+Sample 128 - True: Iris-virginica, Predicted: Iris-virginica
+[5.055, 1.447, 3.141]
+Sample 131 - True: Iris-virginica, Predicted: Iris-setosa
+[1.527, 3.248, 4.987]
+Sample 145 - True: Iris-virginica, Predicted: Iris-virginica
+[1.563, 3.01, 6.182]
+Sample 108 - True: Iris-virginica, Predicted: Iris-virginica
+[1.719, 3.211, 5.381]
+Sample 143 - True: Iris-virginica, Predicted: Iris-virginica
+[4.55, 1.561, 1.594]
+Sample 45 - True: Iris-setosa, Predicted: Iris-setosa
+[4.793, 1.269, 1.938]
+Sample 30 - True: Iris-setosa, Predicted: Iris-setosa
+[4.926, 3.202, 4.196]
+Sample 22 - True: Iris-setosa, Predicted: Iris-setosa
+[4.711, 5.241, 4.322]
+Sample 15 - True: Iris-setosa, Predicted: Iris-versicolor
+[2.821, 3.234, 1.526]
+Sample 65 - True: Iris-versicolor, Predicted: Iris-versicolor
+[4.839, 1.785, 3.051]
+Sample 11 - True: Iris-setosa, Predicted: Iris-setosa
+[4.825, 1.365, 2.508]
+Sample 42 - True: Iris-setosa, Predicted: Iris-setosa
+[1.71, 2.941, 4.114]
+Sample 146 - True: Iris-virginica, Predicted: Iris-virginica
+[3.077, 2.96, 1.82]
+Sample 51 - True: Iris-versicolor, Predicted: Iris-setosa
+[5.068, 2.306, 3.531]
+Sample 27 - True: Iris-setosa, Predicted: Iris-setosa
+[4.981, 3.175, 4.083]
+Sample 4 - True: Iris-setosa, Predicted: Iris-setosa
+[4.738, 5.167, 4.449]
+Sample 32 - True: Iris-setosa, Predicted: Iris-versicolor
+[1.642, 2.731, 4.544]
+Sample 142 - True: Iris-virginica, Predicted: Iris-virginica
+[4.21, 2.018, 2.069]
+Sample 85 - True: Iris-versicolor, Predicted: Iris-setosa
+[2.568, 3.577, 2.422]
+Sample 86 - True: Iris-versicolor, Predicted: Iris-versicolor
+[4.743, 5.305, 4.218]
+Sample 16 - True: Iris-setosa, Predicted: Iris-versicolor
+[4.834, 4.084, 4.241]
+Sample 10 - True: Iris-setosa, Predicted: Iris-setosa
 
-Overall Test MSE: 0.21016
+Confusion Matrix:
+Predicted →
+Actual ↓
+            Setosa  Versicolor  Virginica
+Iris-setosa       14           5         0
+Iris-versicolor       3          10         0
+Iris-virginica       1           0        12
 
-
-Configuration: {34: 4.9, 33: 1.0, 32: 3.0, 31: 3.0, 30: 3.0, 29: 2.0, 28: 1.0, 27: 2.0, 26: 1.0, 25: 1.0, 24: 1.0, 23: 0.1, 22: 3.0, 21: 4.9, 20: 4.9, 19: 4.0, 18: 4.9, 17: 1.0, 16: 1.0, 15: 4.9, 14: 0.1, 13: 4.9, 12: 4.9, 11: 3.0, 10: 2.0, 9: 2.0, 8: 0.1, 7: 3.0, 6: 1.0, 5: 0.1, 4: 2.0, 3: 4.9, 2: 4.9, 1: 1.0, 0: 1.0}
-Test sample 73 MSE: 1.00000
-Test sample 18 MSE: 0.00000
-Test sample 118 MSE: 0.00000
-Test sample 78 MSE: 1.00000
-Test sample 76 MSE: 1.00000
-Test sample 31 MSE: 0.00000
-Test sample 64 MSE: 1.00000
-Test sample 141 MSE: 0.00000
-Test sample 68 MSE: 1.00000
-Test sample 82 MSE: 1.00000
-Test sample 110 MSE: 0.00000
-Test sample 12 MSE: 0.00000
-Test sample 36 MSE: 0.00000
-Test sample 9 MSE: 0.00000
-Test sample 19 MSE: 0.00000
-Test sample 56 MSE: 1.00000
-Test sample 104 MSE: 0.00000
-Test sample 69 MSE: 1.00000
-Test sample 55 MSE: 1.00000
-Test sample 132 MSE: 0.00000
-Test sample 29 MSE: 0.00000
-Test sample 127 MSE: 0.00000
-Test sample 26 MSE: 0.00000
-Test sample 128 MSE: 0.00000
-Test sample 131 MSE: 0.00000
-Test sample 145 MSE: 0.00000
-Test sample 108 MSE: 0.00000
-Test sample 143 MSE: 0.00000
-Test sample 45 MSE: 0.00000
-Test sample 30 MSE: 0.00000
-Test sample 22 MSE: 0.00000
-Test sample 15 MSE: 0.00000
-Test sample 65 MSE: 1.00000
-Test sample 11 MSE: 0.00000
-Test sample 42 MSE: 0.00000
-Test sample 146 MSE: 0.00000
-Test sample 51 MSE: 1.00000
-Test sample 27 MSE: 0.00000
-Test sample 4 MSE: 0.00000
-Test sample 32 MSE: 0.00000
-Test sample 142 MSE: 0.00000
-Test sample 85 MSE: 1.00000
-Test sample 86 MSE: 1.00000
-Test sample 16 MSE: 0.00000
-Test sample 10 MSE: 0.00000
-
-
-
-AFTER fixing normalization
-
-Configuration: {34: 0.1, 33: 1.0, 32: 2.0, 31: 2.0, 30: 2.0, 29: 4.9, 28: 2.0, 27: 2.0, 26: 0.1, 25: 4.9, 24: 3.0, 23: 3.0, 22: 4.9, 21: 3.0, 20: 0.1, 19: 3.0, 18: 1.0, 17: 2.0, 16: 1.0, 15: 4.9, 14: 4.9, 13: 0.1, 12: 3.0, 11: 0.1, 10: 4.0, 9: 0.1, 8: 1.0, 7: 2.0, 6: 1.0, 5: 0.1, 4: 2.0, 3: 3.0, 2: 4.0, 1: 1.0, 0: 3.0}
-Test sample 73 MSE: 0.00000
-Test sample 18 MSE: 1.00000
-Test sample 118 MSE: 0.00000
-Test sample 78 MSE: 0.00000
-Test sample 76 MSE: 0.00000
-Test sample 31 MSE: 1.00000
-Test sample 64 MSE: 0.00000
-Test sample 141 MSE: 0.00000
-Test sample 68 MSE: 1.00000
-Test sample 82 MSE: 0.00000
-Test sample 110 MSE: 0.00000
-Test sample 12 MSE: 1.00000
-Test sample 36 MSE: 1.00000
-Test sample 9 MSE: 1.00000
-Test sample 19 MSE: 1.00000
-Test sample 56 MSE: 0.00000
-Test sample 104 MSE: 0.00000
-Test sample 69 MSE: 0.00000
-Test sample 55 MSE: 0.00000
-Test sample 132 MSE: 0.00000
-Test sample 29 MSE: 1.00000
-Test sample 127 MSE: 0.00000
-Test sample 26 MSE: 1.00000
-Test sample 128 MSE: 0.00000
-Test sample 131 MSE: 0.00000
-Test sample 145 MSE: 0.00000
-Test sample 108 MSE: 0.00000
-Test sample 143 MSE: 0.00000
-Test sample 45 MSE: 1.00000
-Test sample 30 MSE: 1.00000
-Test sample 22 MSE: 1.00000
-Test sample 15 MSE: 1.00000
-Test sample 65 MSE: 0.00000
-Test sample 11 MSE: 1.00000
-Test sample 42 MSE: 1.00000
-Test sample 146 MSE: 0.00000
-Test sample 51 MSE: 0.00000
-Test sample 27 MSE: 1.00000
-Test sample 4 MSE: 1.00000
-Test sample 32 MSE: 1.00000
-Test sample 142 MSE: 0.00000
-Test sample 85 MSE: 0.00000
-Test sample 86 MSE: 0.00000
-Test sample 16 MSE: 1.00000
-Test sample 10 MSE: 1.00000
+Overall Accuracy: 80.00%

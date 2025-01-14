@@ -57,7 +57,7 @@ def send_heater_values(ser, heater_values):
     ser.flush()
     ser.reset_input_buffer()
     ser.reset_output_buffer()
-    time.sleep(2.5)
+    #time.sleep(2.5)
 
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
