@@ -6,11 +6,6 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 import random
 
-
-# Need to be careful with the modification of the Id substracting one now, remember to check it on the testing phase
-# Altough I already modified the testing script
-
-
 class ConfigurationManager:
     """Manages configuration generation and validation"""
     def __init__(self):
@@ -187,10 +182,7 @@ class SerialController:
                     # Combine input and heater configurations
                     iris_data = data_processor.df.iloc[sample_id]
                     input_config = config_manager.generate_input_config(iris_data)
-                    
-                    # Merge both configurations
-                    #combined_config = {**config, **input_config}  # This combines both dictionaries
-                    
+        
                     # Send combined configuration once
                     self.send_heater_values(input_config)
                     time.sleep(0.3)
