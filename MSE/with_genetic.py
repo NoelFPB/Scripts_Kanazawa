@@ -109,30 +109,30 @@ class DataProcessor:
             elif species == "Iris-virginica":
                 self.target.append([0, 0, 1])
 
-    # def calculate_mse(self, real1, real2, real3, number):
-    #     """Calculate error based on whether the highest output matches the target class"""
-    #     target = self.target[number]
-    #     real = np.array([real1, real2, real3])
-        
-    #     # Find the index of the maximum value in both arrays
-    #     predicted_class = np.argmax(real)
-    #     true_class = np.argmax(target)
-        
-    #     # Return 0 if the prediction is correct, 1 if incorrect
-    #     error = 0 if predicted_class == true_class else 1
-        
-    #     return error
     def calculate_mse(self, real1, real2, real3, number):
-        """Calculate error using continuous values"""
+        """Calculate error based on whether the highest output matches the target class"""
         target = self.target[number]
         real = np.array([real1, real2, real3])
         
-        # Normalize the outputs
-        real_normalized = real / np.sum(real)
+        # Find the index of the maximum value in both arrays
+        predicted_class = np.argmax(real)
+        true_class = np.argmax(target)
         
-        # Calculate mean squared error between actual and target
-        mse = np.mean((np.array(target) - real_normalized) ** 2)
-        return mse
+        # Return 0 if the prediction is correct, 1 if incorrect
+        error = 0 if predicted_class == true_class else 1
+        
+        return error
+    # def calculate_mse(self, real1, real2, real3, number):
+    #     """Calculate error using continuous values"""
+    #     target = self.target[number]
+    #     real = np.array([real1, real2, real3])
+        
+    #     # Normalize the outputs
+    #     real_normalized = real / np.sum(real)
+        
+    #     # Calculate mean squared error between actual and target
+    #     mse = np.mean((np.array(target) - real_normalized) ** 2)
+    #     return mse
     
 class SerialController:
     def __init__(self, port='COM4', baudrate=9600):
@@ -185,7 +185,7 @@ class SerialController:
         
                     # Send combined configuration once
                     self.send_heater_values(input_config)
-                    time.sleep(0.3)
+                    time.sleep(0.2)
 
                         # Measure outputs
                     outputs = oscilloscope.measure_outputs()
@@ -240,7 +240,9 @@ class SerialController:
         print(f"Configuration: {best_config}")
         confusion_matrix = np.zeros((3, 3), dtype=int)
         classes = ["Iris-setosa", "Iris-versicolor", "Iris-virginica"]
-        
+        self.send_heater_values(best_config)
+        time.sleep(2)
+
         # Test using exactly the same test samples
         for sample_id in test_data:
             # Set input configuration
@@ -251,9 +253,8 @@ class SerialController:
             actual_class = classes.index(iris_data['Species'])
             
             # Send combined configuration
-            combined_config = {**best_config, **input_config}
-            self.send_heater_values(combined_config)
-            
+            self.send_heater_values(input_config)
+            time.sleep(0.2)
             # Measure outputs
             outputs = oscilloscope.measure_outputs()
             print(outputs)
@@ -307,7 +308,7 @@ def main():
         data_processor=data_processor,
         oscilloscope=oscilloscope,
         population_size=15,
-        generations=6,
+        generations=15,
         mutation_rate=0.15
     )
     
