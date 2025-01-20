@@ -1,5 +1,6 @@
 import numpy as np
 import time
+import csv
 import pyvisa as visa
 import serial
 import pandas as pd
@@ -7,8 +8,8 @@ from sklearn.model_selection import train_test_split
 import random
 
 
-# Need to be careful with the modification of the Id substracting one now, remember to check it on the testing phase
-# Altough I already modified the testing script
+# This script is for testing a specific configuration after it is found
+# It can generate the confusion matrix
 
 
 class ConfigurationManager:
@@ -116,19 +117,13 @@ class DataProcessor:
                 self.target.append([0, 0, 1])
 
     def calculate_mse(self, real1, real2, real3, number):
-        """Calculate error based on whether the highest output matches the target class"""
+        """Calculate Mean Squared Error for outputs"""
         target = self.target[number]
         real = np.array([real1, real2, real3])
-        
-        # Find the index of the maximum value in both arrays
-        predicted_class = np.argmax(real)
-        true_class = np.argmax(target)
-        
-        # Return 0 if the prediction is correct, 1 if incorrect
-        error = 0 if predicted_class == true_class else 1
-        
-        return error
-    
+        ratio = real / np.sum(real)
+        mse = (np.sum((target - ratio)**2) / 3)
+        return round(mse, 5)
+
 class SerialController:
     def __init__(self, port='COM4', baudrate=9600):
         self.port = port
@@ -152,7 +147,7 @@ class SerialController:
         self.ser.flush()
         self.ser.reset_input_buffer()
         self.ser.reset_output_buffer()
-        time.sleep(2)
+        time.sleep(0.001)
 
     def train(self, config_manager, data_processor, oscilloscope, population_size=10, generations=5, mutation_rate=0.1):
         """Training phase using genetic algorithm to find optimal configurations"""
@@ -183,16 +178,17 @@ class SerialController:
                     
                     # Send combined configuration once
                     self.send_heater_values(combined_config)
+                    time.sleep(2)
                         # Measure outputs
                     outputs = oscilloscope.measure_outputs()
                     if outputs[0] is not None:
                         mse = data_processor.calculate_mse(*outputs, sample_id)
                         generation_mse.append(mse)
-                        print(f"Sample {sample_id} Result: {mse:.5f}")
+                        print(f"Sample {sample_id} MSE: {mse:.5f}")
                 
                 avg_mse = np.mean(generation_mse) if generation_mse else float('inf')
                 fitness.append((config, avg_mse))
-                print(f"Configuration average (closer to 0 is more accurate): {avg_mse:.5f}")
+                print(f"Configuration average MSE: {avg_mse:.5f}")
             
             # Update best configurations
             fitness.sort(key=lambda x: x[1])
@@ -243,7 +239,6 @@ class SerialController:
             self.send_heater_values(input_config)
             time.sleep(2)
             
-            # I should merge them like in train.
             # Apply best configuration
             self.send_heater_values(best_config)
             time.sleep(2)
@@ -258,11 +253,77 @@ class SerialController:
         avg_test_mse = np.mean(test_mse)
         print(f"\nOverall Test MSE: {avg_test_mse:.5f}")
 
+
+    def test_fixed_configuration(self, data_processor, oscilloscope, config_manager):
+        """Testing phase using a pre-defined heater configuration and specific test indices"""
+        print("\nStarting Testing with Fixed Configuration...")
+        
+        # Your exact test indices from the previous run
+        # test_indices = [73, 18, 118, 78, 76, 31, 64, 141, 68, 82, 110, 12, 36, 9, 19, 
+        #                 56, 104, 69, 55, 132, 29, 127, 26, 128, 131, 145, 108, 143, 45, 
+        #                 30, 22, 15, 65, 11, 42, 146, 51, 27, 4, 32, 142, 85, 86, 16, 10]
+        
+        # # Your best heater configuration
+        # best_config = {34: 4.9, 33: 1.0, 32: 2.0, 31: 3.0, 30: 0.1, 29: 1.0, 28: 2.0, 
+        #             27: 1.0, 26: 1.0, 25: 4.9, 24: 3.0, 23: 4.9, 22: 2.0, 21: 0.1, 
+        #             20: 3.0, 19: 1.0, 18: 1.0, 17: 4.9, 16: 4.9, 15: 1.0, 14: 3.0, 
+        #             13: 2.0, 12: 0.1, 11: 2.0, 10: 1.0, 9: 4.0, 8: 0.1, 7: 4.9, 
+        #             6: 0.1, 5: 4.9, 4: 0.1, 3: 3.0, 2: 4.9, 1: 1.0, 0: 0.1}
+        # test_indices = [73, 18, 118, 78, 76, 31, 64, 141, 68, 82, 110, 12, 36, 9, 19, 56, 104, 69, 55, 132, 29, 127, 26, 128, 131, 145, 108, 143, 45, 30, 22, 15, 65, 11, 42, 146, 51, 27, 4, 32, 142, 85, 86, 16, 10]
+        # best_config = {34: 4.9, 33: 1.0, 32: 3.0, 31: 3.0, 30: 3.0, 29: 2.0, 28: 1.0, 27: 2.0, 26: 1.0, 25: 1.0, 24: 1.0, 23: 0.1, 22: 3.0, 21: 4.9, 20: 4.9, 19: 4.0, 18: 4.9, 17: 1.0, 16: 1.0, 15: 4.9, 14: 0.1, 13: 4.9, 12: 4.9, 11: 3.0, 10: 2.0, 9: 2.0, 8: 0.1, 7: 3.0, 6: 1.0, 5: 0.1, 4: 2.0, 3: 4.9, 2: 4.9, 1: 1.0, 0: 1.0}
+        
+        test_indices = [73, 18, 118, 78, 76, 31, 64, 141, 68, 82, 110, 12, 36, 9, 19, 56, 104, 69, 55, 132, 29, 127, 26, 128, 131, 145, 108, 143, 45, 30, 22, 15, 65, 11, 42, 146, 51, 27, 4, 32, 142, 85, 86, 16, 10]
+        best_config = {34: 0.1, 33: 1.0, 32: 2.0, 31: 2.0, 30: 2.0, 29: 4.9, 28: 2.0, 27: 2.0, 26: 0.1, 25: 4.9, 24: 3.0, 23: 3.0, 22: 4.9, 21: 3.0, 20: 0.1, 19: 3.0, 18: 1.0, 17: 2.0, 16: 1.0, 15: 4.9, 14: 4.9, 13: 0.1, 12: 3.0, 11: 0.1, 10: 4.0, 9: 0.1, 8: 1.0, 7: 2.0, 6: 1.0, 5: 0.1, 4: 2.0, 3: 3.0, 2: 4.0, 1: 1.0, 0: 3.0}
+        # # Initialize confusion matrix
+        confusion_matrix = np.zeros((3, 3), dtype=int)
+        classes = ["Iris-setosa", "Iris-versicolor", "Iris-virginica"]
+        
+        # Test using exactly the same test samples
+        for sample_id in test_indices:
+            # Set input configuration
+            iris_data = data_processor.df.iloc[sample_id]
+            input_config = config_manager.generate_input_config(iris_data)
+            
+            # Get actual class
+            actual_class = classes.index(iris_data['Species'])
+            
+            # Send combined configuration
+            combined_config = {**best_config, **input_config}
+            self.send_heater_values(combined_config)
+            time.sleep(2)
+            
+            # Measure outputs
+            outputs = oscilloscope.measure_outputs()
+            if outputs[0] is not None:
+                # Normalize outputs to get probabilities
+                outputs_array = np.array(outputs)
+                output_probs = outputs_array / np.sum(outputs_array)
+                
+                # Get predicted class
+                predicted_class = np.argmax(output_probs)
+                
+                # Update confusion matrix
+                confusion_matrix[actual_class][predicted_class] += 1
+                
+                print(f"Sample {sample_id} - True: {classes[actual_class]}, Predicted: {classes[predicted_class]}")
+        
+        # Print confusion matrix
+        print("\nConfusion Matrix:")
+        print("Predicted →")
+        print("Actual ↓")
+        print("            Setosa  Versicolor  Virginica")
+        for i, actual in enumerate(classes):
+            print(f"{actual:12} {confusion_matrix[i][0]:7d} {confusion_matrix[i][1]:11d} {confusion_matrix[i][2]:9d}")
+        
+        # Calculate accuracy
+        accuracy = np.trace(confusion_matrix) / np.sum(confusion_matrix)
+        print(f"\nOverall Accuracy: {accuracy:.2%}")
+
 def main():
     oscilloscope = OscilloscopeController()
     config_manager = ConfigurationManager()
     data_processor = DataProcessor(
-        csv_path='C:\\Users\\noelp\\Documents\\Kanazawa\\Scripts_Kanazawa\\MSE\\Datasets\\iris_normalized.csv' )
+        csv_path='C:\\Users\\noelp\\Documents\\Kanazawa\\Scripts_Kanazawa\\MSE\\Datasets\\iris_normalized.csv')
     serial_controller = SerialController()
 
     # Setup connections
@@ -273,21 +334,11 @@ def main():
         print("Failed to connect to serial port")
         return
 
-    # Load data and create train/test split
+    # Load data
     data_processor.load_data()
     
-    # Training phase
-    serial_controller.train(
-        config_manager=config_manager,
-        data_processor=data_processor,
-        oscilloscope=oscilloscope,
-        population_size=14,
-        generations=7,
-        mutation_rate=0.1
-    )
-    
-    # Testing phase
-    serial_controller.test(
+    # Run testing with fixed configuration
+    serial_controller.test_fixed_configuration(
         data_processor=data_processor,
         oscilloscope=oscilloscope,
         config_manager=config_manager
