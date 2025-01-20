@@ -6,18 +6,12 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 import random
 
-
-# Need to be careful with the modification of the Id substracting one now, remember to check it on the testing phase
-# Altough I already modified the testing script
-
-
 class ConfigurationManager:
     """Manages configuration generation and validation"""
     def __init__(self):
         self.modifiable_heaters = sorted([i for i in range(35)], reverse=True)
         self.fixed_inputs = list(range(36, 40))
         self.voltage_options = [0.1, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 4.9]
-        
     def generate_random_config(self):
         """Generate a random configuration with diverse voltage settings"""
         config = {
@@ -128,6 +122,17 @@ class DataProcessor:
         error = 0 if predicted_class == true_class else 1
         
         return error
+    # def calculate_mse(self, real1, real2, real3, number):
+    #     """Calculate error using continuous values"""
+    #     target = self.target[number]
+    #     real = np.array([real1, real2, real3])
+        
+    #     # Normalize the outputs
+    #     real_normalized = real / np.sum(real)
+        
+    #     # Calculate mean squared error between actual and target
+    #     mse = np.mean((np.array(target) - real_normalized) ** 2)
+    #     return mse
     
 class SerialController:
     def __init__(self, port='COM4', baudrate=9600):
@@ -152,7 +157,6 @@ class SerialController:
         self.ser.flush()
         self.ser.reset_input_buffer()
         self.ser.reset_output_buffer()
-        time.sleep(2)
 
     def train(self, config_manager, data_processor, oscilloscope, population_size=10, generations=5, mutation_rate=0.1):
         """Training phase using genetic algorithm to find optimal configurations"""
@@ -167,8 +171,9 @@ class SerialController:
         for generation in range(generations):
             print(f"\nGeneration {generation + 1}/{generations}:")
             fitness = []
-            
             for idx, config in enumerate(population):
+                self.send_heater_values(config)
+                time.sleep(2)
                 generation_mse = []
                 print(f"\nTesting configuration {idx + 1}/{population_size}")
                 
@@ -177,12 +182,11 @@ class SerialController:
                     # Combine input and heater configurations
                     iris_data = data_processor.df.iloc[sample_id]
                     input_config = config_manager.generate_input_config(iris_data)
-                    
-                    # Merge both configurations
-                    combined_config = {**config, **input_config}  # This combines both dictionaries
-                    
+        
                     # Send combined configuration once
-                    self.send_heater_values(combined_config)
+                    self.send_heater_values(input_config)
+                    time.sleep(0.2)
+
                         # Measure outputs
                     outputs = oscilloscope.measure_outputs()
                     if outputs[0] is not None:
@@ -234,29 +238,51 @@ class SerialController:
         best_config = self.best_configurations[0][0]
         print(f"\nTesting best configuration:")
         print(f"Configuration: {best_config}")
-        
-        test_mse = []
+        confusion_matrix = np.zeros((3, 3), dtype=int)
+        classes = ["Iris-setosa", "Iris-versicolor", "Iris-virginica"]
+        self.send_heater_values(best_config)
+        time.sleep(2)
+
+        # Test using exactly the same test samples
         for sample_id in test_data:
             # Set input configuration
             iris_data = data_processor.df.iloc[sample_id]
             input_config = config_manager.generate_input_config(iris_data)
+            
+            # Get actual class
+            actual_class = classes.index(iris_data['Species'])
+            
+            # Send combined configuration
             self.send_heater_values(input_config)
-            time.sleep(2)
-            
-            # I should merge them like in train.
-            # Apply best configuration
-            self.send_heater_values(best_config)
-            time.sleep(2)
-            
-            # Measure and calculate MSE
+            time.sleep(0.2)
+            # Measure outputs
             outputs = oscilloscope.measure_outputs()
+            print(outputs)
             if outputs[0] is not None:
-                mse = data_processor.calculate_mse(*outputs, sample_id)
-                test_mse.append(mse)
-                print(f"Test sample {sample_id} MSE: {mse:.5f}")
+                # Normalize outputs to get probabilities
+                outputs_array = np.array(outputs)
+                output_probs = outputs_array / np.sum(outputs_array)
+                
+                # Get predicted class
+                predicted_class = np.argmax(output_probs)
+                
+                # Update confusion matrix
+                confusion_matrix[actual_class][predicted_class] += 1
+                
+                print(f"Sample {sample_id} - True: {classes[actual_class]}, Predicted: {classes[predicted_class]}")
         
-        avg_test_mse = np.mean(test_mse)
-        print(f"\nOverall Test MSE: {avg_test_mse:.5f}")
+        # Print confusion matrix
+        print("\nConfusion Matrix:")
+        print("Predicted →")
+        print("Actual ↓")
+        print("            Setosa  Versicolor  Virginica")
+        for i, actual in enumerate(classes):
+            print(f"{actual:12} {confusion_matrix[i][0]:7d} {confusion_matrix[i][1]:11d} {confusion_matrix[i][2]:9d}")
+        
+        # Calculate accuracy
+        accuracy = np.trace(confusion_matrix) / np.sum(confusion_matrix)
+        print(f"\nOverall Accuracy: {accuracy:.2%}")
+
 
 def main():
     oscilloscope = OscilloscopeController()
@@ -281,9 +307,9 @@ def main():
         config_manager=config_manager,
         data_processor=data_processor,
         oscilloscope=oscilloscope,
-        population_size=14,
-        generations=7,
-        mutation_rate=0.1
+        population_size=15,
+        generations=15,
+        mutation_rate=0.15
     )
     
     # Testing phase

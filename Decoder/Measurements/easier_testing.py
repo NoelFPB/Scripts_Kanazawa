@@ -57,7 +57,7 @@ def send_heater_values(ser, heater_values):
     ser.flush()
     ser.reset_input_buffer()
     ser.reset_output_buffer()
-    time.sleep(2.5)
+    #time.sleep(2.5)
 
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
@@ -119,6 +119,8 @@ def main():
             #             "35": 0.01, "36": 0.01, "37": 0.01, "38": 0.01, "39": 0.01
             #         }
             
+
+            # Best one over all
             initial_config = {
                 "0": 0.10, "1": 0.10, "2": 0.10, "3": 0.10, "4": 4.90, "5": 0.10, "6": 0.10,
                 "7": 4.90, "8": 4.90, "9": 4.90, "10": 4.90, "11": 3.70, "12": 0.10, "13": 0.10,

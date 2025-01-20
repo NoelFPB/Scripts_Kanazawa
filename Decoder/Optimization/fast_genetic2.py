@@ -8,7 +8,7 @@ from typing import Dict, List, Tuple, Optional
 
 # Enhanced Constants
 SERIAL_PORT = 'COM4'
-BAUD_RATE = 115200
+BAUD_RATE = 9600
 CACHE_SIZE = 1024
 VOLTAGE_OPTIONS = [0.1, 1.0, 2.5, 3.7, 4.9]  # Expanded voltage options
 INPUT_COMBINATIONS = [(0.1, 0.1), (0.1, 4.9), (4.9, 0.1), (4.9, 4.9)]
@@ -58,7 +58,7 @@ class HardwareInterface:
         voltage_message = "".join(f"{h},{v};" for h, v in config.items()) + '\n'
         self.ser.write(voltage_message.encode())
         self.ser.flush()
-        time.sleep(0.2)  # Reduced delay 
+        time.sleep(2)  # Reduced delay 
         self.ser.reset_input_buffer()
         self.ser.reset_output_buffer()
     
@@ -89,13 +89,19 @@ class GeneticOptimizer:
         self.best_configs_history = []  # Track best configurations
     
     @lru_cache(maxsize=CACHE_SIZE)
-    def evaluate_single_input(self, config_str: str, input_state: tuple) -> float:
+
+
+    def evaluate_single_input(self, input_state: tuple) -> float:
         """Evaluate single input combination with caching"""
-        config = json.loads(config_str)
-        config["36"] = input_state[0]
-        config["37"] = input_state[1]
+
+        changed_values = {
+            36: input_state[0],
+            37: input_state[1]
+        }
         
-        self.hardware.send_heater_values(config)
+        self.hardware.send_heater_values(changed_values)
+        time.sleep(0.2)
+
         outputs = self.hardware.measure_outputs()
         
         if None in outputs:
@@ -117,9 +123,10 @@ class GeneticOptimizer:
     
     def evaluate_configuration(self, config: Dict[str, float]) -> float:
         """Evaluate full configuration"""
-        config_str = json.dumps(config, sort_keys=True)
-        return sum(self.evaluate_single_input(config_str, input_state) 
-                  for input_state in INPUT_COMBINATIONS)
+        self.hardware.send_heater_values(config)
+        time.sleep(2)
+        return sum(self.evaluate_single_input(input_state) 
+              for input_state in INPUT_COMBINATIONS)
     
     def tournament_select(self, population: List[Dict[str, float]], 
                          fitness: List[float], 
@@ -268,7 +275,6 @@ class GeneticOptimizer:
         return best_config, best_score
 
 def main():
-    print("start")
     try:
         # Initialize components
         config_manager = ConfigurationManager()
@@ -277,8 +283,8 @@ def main():
         
         # Run optimization
         best_config, best_score = optimizer.optimize(
-            pop_size=40,
-            generations=50,
+            pop_size=30,
+            generations=25,
             base_mutation_rate=0.1,
             early_stop=15
         )
