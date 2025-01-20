@@ -72,7 +72,7 @@ class DataProcessor:
         )
 
 class SerialController:
-    def __init__(self, port='COM4', baudrate=9600):
+    def __init__(self, port='COM4', baudrate=115200):
         self.port = port
         self.baudrate = baudrate
         self.ser = None
@@ -109,7 +109,9 @@ class SerialController:
         #               6: 0.1, 5: 1.5, 4: 3.5, 3: 2.5, 2: 3.5, 1: 0.1, 0: 3.5}
         
         #best_config = {0: 3.0, 1: 2.0, 2: 1.5, 3: 0.5, 4: 2.0, 5: 4.0, 6: 4.9, 7: 2.5, 8: 2.0, 9: 3.0, 10: 1.0, 11: 4.5, 12: 2.5, 13: 0.1, 14: 0.1, 15: 2.0, 16: 4.9, 17: 1.5, 18: 4.0, 19: 4.0, 20: 4.5, 21: 1.5, 22: 3.0, 23: 3.5, 24: 2.0, 25: 2.0, 26: 4.9, 27: 2.0, 28: 3.5, 29: 4.5, 30: 1.0, 31: 2.0, 32: 4.5, 33: 1.0, 34: 1.0}
-        best_config ={0: 4.5, 1: 2.0, 2: 1.0, 3: 1.0, 4: 3.0, 5: 3.0, 6: 2.5, 7: 0.1, 8: 4.0, 9: 2.5, 10: 2.5, 11: 2.5, 12: 0.5, 13: 4.0, 14: 2.0, 15: 0.1, 16: 3.0, 17: 1.0, 18: 0.1, 19: 1.0, 20: 4.5, 21: 2.0, 22: 0.1, 23: 2.5, 24: 4.9, 25: 4.5, 26: 3.0, 27: 3.5, 28: 3.0, 29: 2.0, 30: 2.5, 31: 4.0, 32: 3.5, 33: 3.5, 34: 4.9}
+        #best_config ={0: 4.5, 1: 2.0, 2: 1.0, 3: 1.0, 4: 3.0, 5: 3.0, 6: 2.5, 7: 0.1, 8: 4.0, 9: 2.5, 10: 2.5, 11: 2.5, 12: 0.5, 13: 4.0, 14: 2.0, 15: 0.1, 16: 3.0, 17: 1.0, 18: 0.1, 19: 1.0, 20: 4.5, 21: 2.0, 22: 0.1, 23: 2.5, 24: 4.9, 25: 4.5, 26: 3.0, 27: 3.5, 28: 3.0, 29: 2.0, 30: 2.5, 31: 4.0, 32: 3.5, 33: 3.5, 34: 4.9}
+        best_config = {34: 3.92, 33: 0.67, 32: 1.54, 31: 4.57, 30: 1.6, 29: 3.47, 28: 2.26, 27: 3.55, 26: 2.32, 25: 0.8, 24: 4.78, 23: 3.87, 22: 2.63, 21: 0.78, 20: 0.41, 19: 4.31, 18: 0.41, 17: 2.45, 16: 2.92, 15: 4.31, 14: 3.65, 13: 2.37, 12: 2.88, 11: 2.76, 10: 0.94, 9: 3.75, 8: 0.72, 7: 1.5, 6: 4.06, 5: 4.14, 4: 4.14, 3: 1.18, 2: 2.69, 1: 3.21, 0: 1.84}
+        
         confusion_matrix = np.zeros((3, 3), dtype=int)
         classes = ["Iris-setosa", "Iris-versicolor", "Iris-virginica"]
         
@@ -121,9 +123,8 @@ class SerialController:
             input_config = config_manager.generate_input_config(iris_data)
             
             actual_class = classes.index(iris_data['Species'])
-            
             self.send_heater_values(input_config)
-            time.sleep(0.2)
+            time.sleep(0.5)
             # With 0.2 seconds I get the same result as with 2 seconds.
             # The scale shouuld be as one block 200uS
             outputs = oscilloscope.measure_outputs()

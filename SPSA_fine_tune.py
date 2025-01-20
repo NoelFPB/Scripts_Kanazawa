@@ -134,10 +134,116 @@ class SerialController:
         self.ser.reset_output_buffer()
         time.sleep(0.01)
 
-    def train(self, config_manager, data_processor, oscilloscope, learning_rate, delta, iterations):
-        """Train using SPSA"""
-        print("\nStarting SPSA Training...")
+    def evaluate_config(self, config, validation_data, data_processor, config_manager, oscilloscope):
+        """Evaluate configuration on validation set"""
+        correct = 0
+        total = 0
         
+        for sample_id in validation_data:
+            iris_data = data_processor.df.iloc[sample_id]
+            input_config = config_manager.generate_input_config(iris_data)
+            combined_config = {**config, **input_config}
+            
+            self.send_heater_values(combined_config)
+            time.sleep(0.25)
+            outputs = oscilloscope.measure_outputs()
+            
+            if outputs[0] is not None:
+                outputs_array = np.array(outputs)
+                output_probs = outputs_array / np.sum(outputs_array)
+                predicted_class = np.argmax(output_probs)
+                actual_class = np.argmax(data_processor.target[sample_id])
+                
+                if predicted_class == actual_class:
+                    correct += 1
+            total += 1
+        
+        return correct / total if total > 0 else 0
+
+    def fine_tune(self, initial_config, config_manager, data_processor, oscilloscope, 
+                 learning_rate=0.05, iterations=30, patience=10):
+        """Fine-tune the configuration using a more focused approach"""
+        print("\nStarting Fine-tuning Phase...")
+        
+        best_config = initial_config.copy()
+        best_accuracy = 0
+        patience_counter = 0
+        w = initial_config.copy()
+        
+        # Create validation set from training data
+        train_data = list(data_processor.train_indices)
+        random.shuffle(train_data)
+        validation_size = int(len(train_data) * 0.2)
+        validation_data = train_data[:validation_size]
+        
+        for iteration in range(iterations):
+            # Select a subset of heaters to tune
+            heaters_to_tune = random.sample(config_manager.modifiable_heaters, k=5)
+            
+            for heater in heaters_to_tune:
+                # Try small perturbations in both directions
+                deltas = [-0.3, 0.3]
+                best_delta = 0
+                best_local_accuracy = 0
+                
+                for delta in deltas:
+                    temp_config = w.copy()
+                    temp_config[heater] = np.clip(
+                        temp_config[heater] + delta,
+                        config_manager.voltage_min,
+                        config_manager.voltage_max
+                    )
+                    
+                    accuracy = self.evaluate_config(
+                        temp_config,
+                        validation_data,
+                        data_processor,
+                        config_manager,
+                        oscilloscope
+                    )
+                    
+                    if accuracy > best_local_accuracy:
+                        best_local_accuracy = accuracy
+                        best_delta = delta
+                
+                # Apply the best perturbation
+                w[heater] = np.clip(
+                    w[heater] + best_delta,
+                    config_manager.voltage_min,
+                    config_manager.voltage_max
+                )
+            
+            # Evaluate current configuration
+            current_accuracy = self.evaluate_config(
+                w,
+                validation_data,
+                data_processor,
+                config_manager,
+                oscilloscope
+            )
+            print(f"Fine-tuning iteration {iteration}/{iterations}, "
+                  f"Validation Accuracy: {current_accuracy:.2%}")
+            
+            if current_accuracy > best_accuracy:
+                best_accuracy = current_accuracy
+                best_config = w.copy()
+                patience_counter = 0
+            else:
+                patience_counter += 1
+                
+            # Early stopping
+            if patience_counter >= patience:
+                print(f"Early stopping triggered after {iteration + 1} iterations")
+                break
+        
+        print(f"Fine-tuning complete! Best validation accuracy: {best_accuracy:.2%}")
+        return best_config
+
+    def train(self, config_manager, data_processor, oscilloscope, 
+              learning_rate=0.1, delta=0.5, iterations=300):
+        """Complete training process: SPSA followed by fine-tuning"""
+        # SPSA Training
+        print("\nStarting SPSA Training...")
         w = config_manager.generate_random_config()
         train_data = list(data_processor.train_indices)
 
@@ -180,14 +286,22 @@ class SerialController:
 
                 # Clip values to valid range
                 w = {h: np.clip(value, config_manager.voltage_min, config_manager.voltage_max) 
-                for h, value in w.items()}
+                    for h, value in w.items()}
 
-      
-            print(f"Iteration {iteration}/{iterations}, Loss: {L_plus:.4f}")
+                print(f"Iteration {iteration}/{iterations}, Loss: {L_plus:.4f}")
 
-        print("Training complete!")
-        return w
-    
+        print("SPSA Training complete!")
+        
+        # Fine-tuning phase
+        final_config = self.fine_tune(
+            initial_config=w,
+            config_manager=config_manager,
+            data_processor=data_processor,
+            oscilloscope=oscilloscope
+        )
+        
+        return final_config
+
     def test_configuration(self, config, data_processor, oscilloscope, config_manager):
         """Testing phase using the trained configuration"""
         print("\nStarting Testing with Trained Configuration...")
@@ -228,7 +342,6 @@ class SerialController:
         print(f"\nOverall Accuracy: {accuracy:.2%}")
         
         return None
-
 
 def main():
     oscilloscope = OscilloscopeController()
