@@ -1,14 +1,12 @@
 import serial
 import time
 import pyvisa
-import json
 import keyboard
 import os
-import csv
 
 # Serial port configuration
 SERIAL_PORT = 'COM4'
-BAUD_RATE = 9600
+BAUD_RATE = 115200
 
 # Define heater combinations for each key
 HEATER_COMBINATIONS = {
@@ -57,7 +55,7 @@ def send_heater_values(ser, heater_values):
     ser.flush()
     ser.reset_input_buffer()
     ser.reset_output_buffer()
-    #time.sleep(2.5)
+    time.sleep(0.01)
 
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
@@ -81,14 +79,6 @@ def display_all_heaters(heater_values):
 def main():
     try:
         # Create log file
-        with open('heater_changes.csv', 'w', newline='') as csvfile:
-            csv_writer = csv.writer(csvfile)
-            # Write header
-            csv_writer.writerow([
-                'Input_A_Old', 'Input_A_New',
-                'Input_B_Old', 'Input_B_New',
-                'Output1', 'Output2', 'Output3', 'Output4'
-            ])
             
             # Load initial heater configuration
             # initial_config = {"0": 0.10, "1": 2.50, "2": 4.90, "3": 2.50, "4": 0.10, "5": 2.50, "6": 2.50,
@@ -121,19 +111,20 @@ def main():
             
 
             # Best one over all
-            initial_config = {
-                "0": 0.10, "1": 0.10, "2": 0.10, "3": 0.10, "4": 4.90, "5": 0.10, "6": 0.10,
-                "7": 4.90, "8": 4.90, "9": 4.90, "10": 4.90, "11": 3.70, "12": 0.10, "13": 0.10,
-                "14": 4.90, "15": 4.90, "16": 3.70, "17": 0.10, "18": 3.70, "19": 1.00, "20": 0.10,
-                "21": 0.10, "22": 1.00, "23": 4.90, "24": 3.70, "25": 0.10, "26": 4.90, "27": 4.90,
-                "28": 4.90, "29": 4.90, "30": 3.70, "31": 2.50, "32": 3.70, "33": 0.01, "34": 0.10,
-                "35": 0.50, "36": 0.10, "37": 0.01, "38": 0.01, "39": 0.01
-            }
-            
-            
-            
+            # initial_config = {
+            #     "0": 0.10, "1": 0.10, "2": 0.10, "3": 0.10, "4": 4.90, "5": 0.10, "6": 0.10,
+            #     "7": 4.90, "8": 4.90, "9": 4.90, "10": 4.90, "11": 3.70, "12": 0.10, "13": 0.10,
+            #     "14": 4.90, "15": 4.90, "16": 3.70, "17": 0.10, "18": 3.70, "19": 1.00, "20": 0.10,
+            #     "21": 0.10, "22": 1.00, "23": 4.90, "24": 3.70, "25": 0.10, "26": 4.90, "27": 4.90,
+            #     "28": 4.90, "29": 4.90, "30": 3.70, "31": 2.50, "32": 3.70, "33": 0.01, "34": 0.10,
+            #     "35": 0.50, "36": 0.10, "37": 0.01, "38": 0.01, "39": 0.01
+            # }
+
+
+            initial_config = {0: 2.67, 1: 0.1, 2: 2.11, 3: 0.88, 4: 2.34, 5: 0.81, 6: 4.34, 7: 0.1, 8: 3.59, 9: 1.69, 10: 4.4, 11: 2.17, 12: 3.66, 13: 0.94, 14: 2.93, 15: 2.06, 16: 0.65, 17: 4.9, 18: 4.33, 19: 2.33, 20: 1.5, 21: 2.29, 22: 4.83, 23: 2.56, 24: 2.07, 25: 1.09, 26: 2.37, 27: 2.42, 28: 4.9, 29: 1.83, 30: 4.51, 31: 4.9, 32: 2.64, 33: 2.47, 34: 2.54, 35: 3.02, 36: 3.95, 37: 0.61, 38: 1.78, 39: 0.69}
             heater_values = {int(k): float(v) for k, v in initial_config.items()}
             scope, ser = init_hardware()
+
             
             print_help()
             display_all_heaters(heater_values)
@@ -143,9 +134,6 @@ def main():
             
             while True:
                 value_changed = False
-                input_a_old = prev_value_36
-                input_b_old = prev_value_37
-                
                 for key in ['1', '2', '3', '4']:
                     if keyboard.is_pressed(key):
                         heater_values[36], heater_values[37] = HEATER_COMBINATIONS[key]
@@ -163,15 +151,10 @@ def main():
                     
                 if value_changed:
                     send_heater_values(ser, heater_values)
+                    time.sleep(0.2)
                     outputs = measure_outputs(scope)
                     
                     # Log the change
-                    csv_writer.writerow([
-                        input_a_old, heater_values[36],
-                        input_b_old, heater_values[37],
-                        outputs[0], outputs[1], outputs[2], outputs[3]
-                    ])
-                    csvfile.flush()
                     
                     clear_screen()
                     print_help()

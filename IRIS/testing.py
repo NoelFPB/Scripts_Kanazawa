@@ -116,7 +116,7 @@ class SerialController:
             
             actual_class = classes.index(iris_data['Species'])
             self.send_heater_values(input_config)
-            time.sleep(0.3)
+            time.sleep(0.2)
             # With 0.2 seconds I get the same result as with 2 seconds.
             # The scale shouuld be as one block 200uS
             outputs = oscilloscope.measure_outputs()
@@ -143,7 +143,7 @@ def main():
     oscilloscope = OscilloscopeController()
     oscilloscope.initialize_channels()
     config_manager = ConfigurationManager()
-    data_processor = DataProcessor('C:\\Users\\noelp\\Documents\\Kanazawa\\Scripts_Kanazawa\\MSE\\Datasets\\iris_normalized.csv')
+    data_processor = DataProcessor('C:\\Users\\noelp\\Documents\\Kanazawa\\Scripts_Kanazawa\\IRIS\\Datasets\\iris_normalized.csv')
     serial_controller = SerialController()
 
     if not oscilloscope.connect_oscilloscope():

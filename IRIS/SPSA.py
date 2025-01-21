@@ -234,7 +234,7 @@ def main():
     oscilloscope = OscilloscopeController()
     config_manager = ConfigurationManager()
     data_processor = DataProcessor(
-        csv_path='C:\\Users\\noelp\\Documents\\Kanazawa\\Scripts_Kanazawa\\MSE\\Datasets\\iris_normalized.csv'
+        csv_path='C:\\Users\\noelp\\Documents\\Kanazawa\\Scripts_Kanazawa\\IRIS\\Datasets\\iris_normalized.csv'
     )
     serial_controller = SerialController()
 

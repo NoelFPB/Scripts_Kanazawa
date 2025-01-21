@@ -1,12 +1,11 @@
 import serial
 import time
 import pyvisa
-import json
 import random
 # Works better than hill reversed
 # Serial port configuration 
 SERIAL_PORT = 'COM4'
-BAUD_RATE = 9600
+BAUD_RATE = 115200
 
 # Initialize oscilloscope
 rm = pyvisa.ResourceManager()
@@ -77,7 +76,7 @@ def evaluate_configuration(ser, config):
         current_config[37] = input_state[1]
         
         send_heater_values(ser, current_config)
-        time.sleep(2)
+        time.sleep(0.25)
         
         outputs = measure_outputs()
         if None in outputs:
@@ -164,10 +163,6 @@ def main():
         for heater in sorted(best_config.keys()):
             print(f"Heater {heater}: {best_config[heater]:.2f}V")
         
-        # Save configuration
-        with open("best_fast_configuration.json", 'w') as f:
-            json.dump(best_config, f, indent=4)
-        
         # Test final configuration with detailed analysis
         print("\nTesting final configuration:")
         for input_state in input_combinations:
@@ -176,7 +171,7 @@ def main():
             current_config[37] = input_state[1]
             
             send_heater_values(ser, current_config)
-            time.sleep(2)
+            time.sleep(0.25)
             outputs = measure_outputs()
             
             max_output = max(outputs)

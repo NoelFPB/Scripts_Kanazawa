@@ -6,6 +6,8 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 import random
 
+# With this one the hgihest accuracy achieved was like 80%
+
 class ConfigurationManager:
     """Manages configuration generation and validation"""
     def __init__(self):

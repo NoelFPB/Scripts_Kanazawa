@@ -255,6 +255,7 @@ class SerialController:
             # Generate fixed input configuration
             fixed_inputs = config_manager.generate_input_config(iris_data)
             # Generate random perturbation vector
+            # This will create a vector that has value 1 or -1 for each position, in this case for each heater
             delta_vector = {h: random.choice([-1, 1]) for h in w}
 
             # Perturb configurations
@@ -282,6 +283,7 @@ class SerialController:
                 # Estimate gradients and update
                 for h in w:
                     gradient = (L_plus - L_minus) / (2 * delta * delta_vector[h])
+                    # We use the vector full of +-1 to know the direction of the gradient
                     w[h] -= learning_rate * gradient
 
                 # Clip values to valid range
@@ -347,7 +349,7 @@ def main():
     oscilloscope = OscilloscopeController()
     config_manager = ConfigurationManager()
     data_processor = DataProcessor(
-        csv_path='C:\\Users\\noelp\\Documents\\Kanazawa\\Scripts_Kanazawa\\MSE\\Datasets\\iris_normalized.csv'
+        csv_path='C:\\Users\\noelp\\Documents\\Kanazawa\\Scripts_Kanazawa\\IRIS\\Datasets\\iris_normalized.csv'
     )
     serial_controller = SerialController()
 
