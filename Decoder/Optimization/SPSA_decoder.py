@@ -83,7 +83,7 @@ class DecoderOptimizer:
         
         return ce_loss + 10.0 * incorrect_penalty
 
-    def optimize(self, iterations=1000, delta=0.5, learning_rate=0.2):
+    def optimize(self, iterations=100, delta=0.5, learning_rate=0.2):
         w = {h: random.uniform(0.1, 4.9) for h in MODIFIABLE_HEATERS}
         best_config = w.copy()
         best_loss = float('inf')

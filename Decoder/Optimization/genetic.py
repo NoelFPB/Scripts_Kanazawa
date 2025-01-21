@@ -11,7 +11,7 @@ from typing import Dict, List, Tuple, Optional
 SERIAL_PORT = 'COM4'
 BAUD_RATE = 115200
 CACHE_SIZE = 1024
-VOLTAGE_OPTIONS = [0.1, 1.0, 2.5, 3.7, 4.9]  # Expanded voltage options
+VOLTAGE_OPTIONS = [0.1, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 4.9]  # Expanded voltage options
 INPUT_COMBINATIONS = [(0.1, 0.1), (0.1, 4.9), (4.9, 0.1), (4.9, 4.9)]
 
 class ConfigurationManager:
@@ -90,8 +90,8 @@ class GeneticOptimizer:
         self.best_configs_history = []  # Track best configurations
     
     @lru_cache(maxsize=CACHE_SIZE)
+    
     def evaluate_single_input(self, config_str: str, input_state: tuple) -> float:
-        """Evaluate single input combination with caching"""
         config = json.loads(config_str)
         config["36"] = input_state[0]
         config["37"] = input_state[1]
@@ -102,20 +102,25 @@ class GeneticOptimizer:
         if None in outputs:
             return -10.0
         
-        expected_highest = {
+        expected_channel = {
             (0.1, 0.1): 0, (0.1, 4.9): 1,
             (4.9, 0.1): 2, (4.9, 4.9): 3
         }[input_state]
         
-        max_output = max(outputs)
-        actual_highest = outputs.index(max_output)
+        # Calculate how close we are to the desired ordering
+        target_output = outputs[expected_channel]
+        other_outputs = [v for i, v in enumerate(outputs) if i != expected_channel]
         
-        if actual_highest != expected_highest:
-            return 0.0
+        # Give partial credit based on relative position
+        rank = sum(1 for x in outputs if x > target_output)
+        rank_score = max(0, (3 - rank) * 2)  # 6 points for being highest, 4 for second, 2 for third
         
-        separation = max_output - max(v for i, v in enumerate(outputs) if i != actual_highest)
-        return min(separation * 5, 10)
-    
+        # Add separation bonus
+        separation = target_output - max(other_outputs)
+        separation_score = max(0, min(separation * 5, 4))  # Up to 4 additional points for separation
+        
+        return rank_score + separation_score
+
     def evaluate_configuration(self, config: Dict[str, float]) -> float:
         """Evaluate full configuration"""
         config_str = json.dumps(config, sort_keys=True)
@@ -130,49 +135,69 @@ class GeneticOptimizer:
         tournament_fitness = [fitness[i] for i in tournament_idx]
         winner_idx = tournament_idx[tournament_fitness.index(max(tournament_fitness))]
         return population[winner_idx].copy()
-    
+        
     def adaptive_crossover(self, parent1: Dict[str, float], 
-                          parent2: Dict[str, float],
-                          generation: int) -> Tuple[Dict[str, float], Dict[str, float]]:
-        """Adaptive crossover with varying points"""
-        keys = list(parent1.keys())
-        num_points = min(3, 1 + generation // 15)  # Increase crossover points over time
-        points = sorted(random.sample(range(len(keys)), num_points))
+                        parent2: Dict[str, float],
+                        generation: int) -> Tuple[Dict[str, float], Dict[str, float]]:
+        """Intelligent crossover that preserves channel-specific patterns"""
+        # Group heaters by their influence on each channel
+        channel_groups = {
+            'ch1': range(0, 8),    # Heaters likely affecting channel 1
+            'ch2': range(8, 16),   # Heaters likely affecting channel 2
+            'ch3': range(16, 24),  # Heaters likely affecting channel 3
+            'ch4': range(24, 33)   # Heaters likely affecting channel 4
+        }
         
         child1, child2 = {}, {}
-        swap = True
-        current_point = 0
         
-        for i, key in enumerate(keys):
-            if current_point < len(points) and i >= points[current_point]:
-                swap = not swap
-                current_point += 1
-            
-            if swap:
-                child1[key], child2[key] = parent2[key], parent1[key]
+        # For each channel group, randomly choose whether to take the pattern from parent1 or parent2
+        for group_heaters in channel_groups.values():
+            if random.random() < 0.5:
+                # Take this channel's pattern from parent1
+                for h in group_heaters:
+                    child1[str(h)] = parent1[str(h)]
+                    child2[str(h)] = parent2[str(h)]
             else:
-                child1[key], child2[key] = parent1[key], parent2[key]
+                # Take this channel's pattern from parent2
+                for h in group_heaters:
+                    child1[str(h)] = parent2[str(h)]
+                    child2[str(h)] = parent1[str(h)]
+        
+        # Handle fixed layer heaters
+        for h in range(33, 40):
+            if random.random() < 0.5:
+                child1[str(h)] = parent1[str(h)]
+                child2[str(h)] = parent2[str(h)]
+            else:
+                child1[str(h)] = parent2[str(h)]
+                child2[str(h)] = parent1[str(h)]
         
         return child1, child2
     
     def adaptive_mutation(self, config: Dict[str, float], 
-                         rate: float, 
-                         generation: int) -> Dict[str, float]:
-        """Adaptive mutation with local search"""
+                        rate: float, 
+                        generation: int) -> Dict[str, float]:
+        """Mutation with temperature-based exploration"""
         result = config.copy()
         
+        # Temperature factor decreases from 1.0 to 0.1 over generations
+        temperature = max(1.0 - (generation / 50), 0.1)
+        
         for heater in self.config_manager.modifiable_heaters:
-            if random.random() < rate:
-                current_value = result[str(heater)]
-                # Local search: prefer nearby values
-                if random.random() < 0.7:
-                    idx = VOLTAGE_OPTIONS.index(current_value)
-                    if idx > 0 and idx < len(VOLTAGE_OPTIONS) - 1:
-                        result[str(heater)] = random.choice(
-                            [VOLTAGE_OPTIONS[idx-1], VOLTAGE_OPTIONS[idx+1]]
-                        )
-                else:
+            # Higher temperature = higher chance of mutation
+            if random.random() < rate * temperature:
+                if random.random() < temperature:
+                    # High temperature: completely random choice
                     result[str(heater)] = random.choice(VOLTAGE_OPTIONS)
+                else:
+                    # Low temperature: local search
+                    current_idx = VOLTAGE_OPTIONS.index(result[str(heater)])
+                    max_step = max(1, int(len(VOLTAGE_OPTIONS) * temperature))
+                    new_idx = max(0, min(
+                        len(VOLTAGE_OPTIONS) - 1,
+                        current_idx + random.randint(-max_step, max_step)
+                    ))
+                    result[str(heater)] = VOLTAGE_OPTIONS[new_idx]
         
         return result
     
@@ -278,29 +303,17 @@ def main():
         
         # Run optimization
         best_config, best_score = optimizer.optimize(
-            pop_size=40,
-            generations=50,
+            pop_size=20,
+            generations=25,
             base_mutation_rate=0.1,
-            early_stop=15
+            early_stop=25
         )
         
         print("\nOptimization Complete!")
         print(f"Best Score: {best_score}")
-        print(f"Best Configuration: {json.dumps(best_config, indent=2)}")
+        print(f"Best Configuration: {best_config}")
         
-        # Save results with history
-        results = {
-            "best_config": best_config,
-            "best_score": best_score,
-            "optimization_history": [
-                {"config": config, "score": score}
-                for config, score in optimizer.best_configs_history
-            ]
-        }
         
-        with open("optimization_results.json", 'w') as f:
-            json.dump(results, f, indent=4)
-            
     except Exception as e:
         print(f"Error: {e}")
     finally:
