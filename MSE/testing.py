@@ -116,7 +116,7 @@ class SerialController:
             
             actual_class = classes.index(iris_data['Species'])
             self.send_heater_values(input_config)
-            time.sleep(0.25)
+            time.sleep(0.3)
             # With 0.2 seconds I get the same result as with 2 seconds.
             # The scale shouuld be as one block 200uS
             outputs = oscilloscope.measure_outputs()
