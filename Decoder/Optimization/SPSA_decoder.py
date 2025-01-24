@@ -13,6 +13,13 @@ INPUT_HEATERS = [36, 37]
 INPUT_STATES = [(0.1, 0.1), (0.1, 4.9), (4.9, 0.1), (4.9, 4.9)]
 MODIFIABLE_HEATERS = [i for i in range(40)]
 
+EXPECTED_OUTPUTS = [
+    [1, 0, 0, 0],  # For input (0.1, 0.1) -> strongest on channel 1
+    [0, 1, 0, 0],  # For input (0.1, 4.9) -> strongest on channel 2
+    [0, 0, 1, 0],  # For input (4.9, 0.1) -> strongest on channel 3
+    [0, 0, 0, 1],  # For input (4.9, 4.9) -> strongest on channel 4
+]
+
 class DecoderOptimizer:
     def __init__(self):
         self.scope = self._init_scope()
@@ -46,7 +53,7 @@ class DecoderOptimizer:
         self.serial.flush()
         self.serial.reset_input_buffer()
         self.serial.reset_output_buffer()
-        time.sleep(0.1)
+        time.sleep(0.01)
 
     def evaluate_config(self, config, input_state):
         """Evaluate single configuration with given input state"""
@@ -64,70 +71,63 @@ class DecoderOptimizer:
         
         return probs
 
-    # def calculate_loss(self, probs, target_idx):
-    #     """Calculate cross-entropy loss for single sample"""
-    #     target = np.zeros(4)
-    #     target[target_idx] = 1
-    #     return -np.sum(target * np.log(probs + 1e-10))
-
     def calculate_loss(self, probs, target_idx):
-        """Calculate modified cross-entropy loss with additional penalties"""
+        """Calculate cross-entropy loss for single sample"""
         target = np.zeros(4)
         target[target_idx] = 1
-        
-        # Basic cross-entropy
-        ce_loss = -np.sum(target * np.log(probs + 1e-10))
-        
-        # Add penalty for incorrect outputs being too high
-        incorrect_penalty = np.sum((1 - target) * probs)
-        
-        return ce_loss + 10.0 * incorrect_penalty
-
-    def optimize(self, iterations=100, delta=0.5, learning_rate=0.2):
+        loss = -np.sum(target * np.log(probs + 1e-10))
+        #print(loss)
+        return loss
+    
+    def optimize(self, iterations=100, delta=0.2, learning_rate=0.05):
         w = {h: random.uniform(0.1, 4.9) for h in MODIFIABLE_HEATERS}
         best_config = w.copy()
         best_loss = float('inf')
         
         for iteration in range(iterations):
-            # Test each input state in sequence
-            input_idx = iteration % len(INPUT_STATES)
-            input_state = INPUT_STATES[input_idx]
-            
             # Generate perturbation vector
             delta_vector = {h: random.choice([-1, 1]) for h in MODIFIABLE_HEATERS}
             
             # Create perturbed configurations
             w_plus = {h: min(max(v + delta * delta_vector[h], 0.1), 4.9) 
-                     for h, v in w.items()}
+                    for h, v in w.items()}
             w_minus = {h: min(max(v - delta * delta_vector[h], 0.1), 4.9)
-                      for h, v in w.items()}
+                    for h, v in w.items()}
             
-            # Evaluate both configurations
-            probs_plus = self.evaluate_config(w_plus, input_state)
-            time.sleep(0.05) #This delay is not really necesarry
-            probs_minus = self.evaluate_config(w_minus, input_state)
+            L_plus = 0
+            L_minus = 0
             
-            # Calculate losses
-            L_plus = self.calculate_loss(probs_plus, input_idx)
-            L_minus = self.calculate_loss(probs_minus, input_idx)
-            
-            # Update configuration using gradient approximation
+            for input_state, target_dist in zip(INPUT_STATES, EXPECTED_OUTPUTS):
+                # Evaluate w_plus configuration
+                probs_plus = self.evaluate_config(w_plus, input_state)
+                L_plus += self.calculate_loss(probs_plus, target_dist)
+                
+                # Evaluate w_minus configuration
+                probs_minus = self.evaluate_config(w_minus, input_state)
+                L_minus += self.calculate_loss(probs_minus, target_dist)
+
+            # Average the losses
+            L_plus /= len(INPUT_STATES)
+            L_minus /= len(INPUT_STATES)
+                    
+            # Update configuration
             for h in MODIFIABLE_HEATERS:
                 gradient = (L_plus - L_minus) / (2 * delta * delta_vector[h])
-                w[h] -= learning_rate * gradient  # Gradient descent
-                w[h] = min(max(w[h], 0.1), 4.9)  # Clip values
-            
-            # Evaluate current configuration
-            probs = self.evaluate_config(w, input_state)
-            current_loss = self.calculate_loss(probs, input_idx)
-            
-            # Update best configuration if better
-            if current_loss < best_loss:
-                best_loss = current_loss
-                best_config = w.copy()
-            print(f"Iteration {iteration + 1}: Loss {current_loss:.4f}")
-        
+                w[h] -= learning_rate * gradient
+                w[h] = min(max(w[h], 0.1), 4.9)
+             
+            current_best = min(best_loss, L_plus, L_minus)
+            loss_now = min(L_minus, L_plus)
+            print(f"Iteration {iteration + 1}: Best loss = {current_best:.4f} Current loss = {loss_now:.4f}")
+
+            if L_plus < best_loss:
+                best_loss = L_plus
+                best_config = w_plus.copy()
+            if L_minus < best_loss:
+                best_loss = L_minus
+                best_config = w_minus.copy()
         return best_config, best_loss
+
 
     def cleanup(self):
         self.serial.close()
@@ -140,7 +140,10 @@ def main():
     optimizer = DecoderOptimizer()
     try:
         print("Starting SPSA optimization...")
-        best_config, best_loss = optimizer.optimize()
+        best_config, best_loss = optimizer.optimize(iterations=500, 
+                                                    delta=0.5, 
+                                                    learning_rate=0.4)
+        
         print(f"\nOptimization complete! Final loss: {best_loss:.4f}")
         clean_config = optimizer.format_config(best_config)
         print(clean_config)
@@ -152,7 +155,7 @@ def main():
             current_config[37] = input_state[1]
             
             optimizer.send_heater_values(current_config)
-            time.sleep(0.5)
+            time.sleep(0.2)
             outputs = optimizer.measure_outputs()
             
             max_output = max(outputs)

@@ -5,13 +5,17 @@ import json
 import random
 from functools import lru_cache
 from typing import Dict, List, Tuple, Optional
+import numpy as np
 # I found the best configuration with this one in the past
 
 # Enhanced Constants
 SERIAL_PORT = 'COM4'
 BAUD_RATE = 115200
 CACHE_SIZE = 1024
-VOLTAGE_OPTIONS = [0.1, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 4.9]  # Expanded voltage options
+# Create voltage options from 0.1 to 4.9 with 0.1 step
+VOLTAGE_OPTIONS = [round(v/10, 1) for v in range(1, 50)]
+# This gives us: [0.1, 0.2, 0.3, ..., 4.8, 4.9]
+
 INPUT_COMBINATIONS = [(0.1, 0.1), (0.1, 4.9), (4.9, 0.1), (4.9, 4.9)]
 
 class ConfigurationManager:
@@ -59,7 +63,7 @@ class HardwareInterface:
         voltage_message = "".join(f"{h},{v};" for h, v in config.items()) + '\n'
         self.ser.write(voltage_message.encode())
         self.ser.flush()
-        time.sleep(0.2)  # Reduced delay 
+        time.sleep(0.25)  # Reduced delay 
         self.ser.reset_input_buffer()
         self.ser.reset_output_buffer()
     
@@ -90,7 +94,7 @@ class GeneticOptimizer:
         self.best_configs_history = []  # Track best configurations
     
     @lru_cache(maxsize=CACHE_SIZE)
-    
+        
     def evaluate_single_input(self, config_str: str, input_state: tuple) -> float:
         config = json.loads(config_str)
         config["36"] = input_state[0]
@@ -102,30 +106,38 @@ class GeneticOptimizer:
         if None in outputs:
             return -10.0
         
-        expected_channel = {
-            (0.1, 0.1): 0, (0.1, 4.9): 1,
-            (4.9, 0.1): 2, (4.9, 4.9): 3
+        # Get target channel and highest output
+        target_idx = {
+            (0.1, 0.1): 0,
+            (0.1, 4.9): 1,
+            (4.9, 0.1): 2,  # Channel 3 for high-low
+            (4.9, 4.9): 3   # Channel 4 for high-high
         }[input_state]
         
-        # Calculate how close we are to the desired ordering
-        target_output = outputs[expected_channel]
-        other_outputs = [v for i, v in enumerate(outputs) if i != expected_channel]
+        max_output = max(outputs)
+        actual_highest = outputs.index(max_output)
         
-        # Give partial credit based on relative position
-        rank = sum(1 for x in outputs if x > target_output)
-        rank_score = max(0, (3 - rank) * 2)  # 6 points for being highest, 4 for second, 2 for third
+        # If wrong channel is highest, return negative score
+        if actual_highest != target_idx:
+            return -10.0  # Penalty for wrong channel
+            
+        # Base score for correct channel
+        score = 10
         
-        # Add separation bonus
-        separation = target_output - max(other_outputs)
-        separation_score = max(0, min(separation * 5, 4))  # Up to 4 additional points for separation
-        
-        return rank_score + separation_score
+        # Bonus points for separation ONLY if correct channel
+        other_outputs = outputs.copy()
+        other_outputs.pop(actual_highest)
+        separation = max_output - max(other_outputs)
+        bonus = min(separation * 5, 10)  # Cap bonus at 10 points
+     
+        return score + bonus
 
     def evaluate_configuration(self, config: Dict[str, float]) -> float:
         """Evaluate full configuration"""
         config_str = json.dumps(config, sort_keys=True)
+        # Average loss across all input combinations
         return sum(self.evaluate_single_input(config_str, input_state) 
-                  for input_state in INPUT_COMBINATIONS)
+                for input_state in INPUT_COMBINATIONS) / len(INPUT_COMBINATIONS)
     
     def tournament_select(self, population: List[Dict[str, float]], 
                          fitness: List[float], 
@@ -139,32 +151,11 @@ class GeneticOptimizer:
     def adaptive_crossover(self, parent1: Dict[str, float], 
                         parent2: Dict[str, float],
                         generation: int) -> Tuple[Dict[str, float], Dict[str, float]]:
-        """Intelligent crossover that preserves channel-specific patterns"""
-        # Group heaters by their influence on each channel
-        channel_groups = {
-            'ch1': range(0, 8),    # Heaters likely affecting channel 1
-            'ch2': range(8, 16),   # Heaters likely affecting channel 2
-            'ch3': range(16, 24),  # Heaters likely affecting channel 3
-            'ch4': range(24, 33)   # Heaters likely affecting channel 4
-        }
-        
+        """Simple crossover without channel grouping"""
         child1, child2 = {}, {}
         
-        # For each channel group, randomly choose whether to take the pattern from parent1 or parent2
-        for group_heaters in channel_groups.values():
-            if random.random() < 0.5:
-                # Take this channel's pattern from parent1
-                for h in group_heaters:
-                    child1[str(h)] = parent1[str(h)]
-                    child2[str(h)] = parent2[str(h)]
-            else:
-                # Take this channel's pattern from parent2
-                for h in group_heaters:
-                    child1[str(h)] = parent2[str(h)]
-                    child2[str(h)] = parent1[str(h)]
-        
-        # Handle fixed layer heaters
-        for h in range(33, 40):
+        # For each heater, randomly choose from either parent
+        for h in range(40):  # All heaters 0-39
             if random.random() < 0.5:
                 child1[str(h)] = parent1[str(h)]
                 child2[str(h)] = parent2[str(h)]
@@ -174,37 +165,34 @@ class GeneticOptimizer:
         
         return child1, child2
     
+    
     def adaptive_mutation(self, config: Dict[str, float], 
-                        rate: float, 
-                        generation: int) -> Dict[str, float]:
-        """Mutation with temperature-based exploration"""
+                    rate: float, 
+                    generation: int) -> Dict[str, float]:
         result = config.copy()
-        
-        # Temperature factor decreases from 1.0 to 0.1 over generations
         temperature = max(1.0 - (generation / 50), 0.1)
         
         for heater in self.config_manager.modifiable_heaters:
-            # Higher temperature = higher chance of mutation
             if random.random() < rate * temperature:
+                current_value = result[str(heater)]
                 if random.random() < temperature:
-                    # High temperature: completely random choice
+                    # Global exploration: completely random value
                     result[str(heater)] = random.choice(VOLTAGE_OPTIONS)
                 else:
-                    # Low temperature: local search
-                    current_idx = VOLTAGE_OPTIONS.index(result[str(heater)])
-                    max_step = max(1, int(len(VOLTAGE_OPTIONS) * temperature))
-                    new_idx = max(0, min(
-                        len(VOLTAGE_OPTIONS) - 1,
-                        current_idx + random.randint(-max_step, max_step)
-                    ))
+                    # Local exploration: move up/down by small steps
+                    current_idx = VOLTAGE_OPTIONS.index(current_value)
+                    # Number of steps to move scales with temperature
+                    max_steps = max(1, int(10 * temperature))  # At most 10 steps (1V) early on
+                    step = random.randint(-max_steps, max_steps)
+                    new_idx = max(0, min(len(VOLTAGE_OPTIONS)-1, current_idx + step))
                     result[str(heater)] = VOLTAGE_OPTIONS[new_idx]
         
         return result
-    
+
     def optimize(self, 
                 pop_size: int = 40,
                 generations: int = 50,
-                base_mutation_rate: float = 0.1,
+                base_mutation_rate: float = 0.3,
                 early_stop: int = 15) -> Tuple[Dict[str, float], float]:
         """Main optimization function with advanced features"""
         population = [
@@ -222,7 +210,7 @@ class GeneticOptimizer:
             # Adaptive parameters
             current_mutation_rate = min(
                 base_mutation_rate * (1 + no_improvement_count * 0.1),
-                0.4
+                0.8
             )
             
             # Evaluate population
@@ -243,11 +231,11 @@ class GeneticOptimizer:
                 no_improvement_count += 1
             
             # Population restart mechanism
-            if no_improvement_count >= early_stop // 2:
+            if no_improvement_count >= early_stop // 3:
                 print("Implementing partial population restart...")
-                population[pop_size//2:] = [
+                population[pop_size//4:] = [
                     self.config_manager.generate_random_config() 
-                    for _ in range(pop_size//2)
+                    for _ in range(3 * pop_size//4)
                 ]
                 no_improvement_count = early_stop // 4  # Partial reset of counter
             
@@ -303,8 +291,8 @@ def main():
         
         # Run optimization
         best_config, best_score = optimizer.optimize(
-            pop_size=20,
-            generations=25,
+            pop_size=35,
+            generations=40,
             base_mutation_rate=0.1,
             early_stop=25
         )
@@ -313,6 +301,33 @@ def main():
         print(f"Best Score: {best_score}")
         print(f"Best Configuration: {best_config}")
         
+
+            # Print final heater configuration
+        print("\nFinal Heater Configuration:")
+        for heater in sorted(best_config.keys()):
+            print(f"Heater {heater}: {best_config[heater]:.2f}V")
+        
+        # Test final configuration with detailed analysis
+        print("\nTesting final configuration:")
+        for input_state in INPUT_COMBINATIONS:
+            current_config = best_config.copy()
+            current_config[36] = input_state[0]
+            current_config[37] = input_state[1]
+            
+            hardware.send_heater_values(current_config)
+            time.sleep(0.25)
+            outputs = hardware.measure_outputs()
+            
+            max_output = max(outputs)
+            max_index = outputs.index(max_output)
+            
+            print(f"\nInputs (A, B): {input_state}")
+            print(f"Outputs: {outputs}")
+            print(f"Highest output: Channel {max_index + 1} = {max_output:.4f}V")
+            other_outputs = outputs.copy()
+            other_outputs.pop(max_index)
+            print(f"Separation from next highest: {(max_output - max(other_outputs)):.4f}V")
+    
         
     except Exception as e:
         print(f"Error: {e}")
