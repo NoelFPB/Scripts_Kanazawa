@@ -11,8 +11,11 @@ from typing import Dict, List, Tuple, Optional
 SERIAL_PORT = 'COM4'
 BAUD_RATE = 115200
 CACHE_SIZE = 1024
-VOLTAGE_OPTIONS = [0.1, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 4.9]  # Expanded voltage options
 INPUT_COMBINATIONS = [(0.1, 0.1), (0.1, 4.9), (4.9, 0.1), (4.9, 4.9)]
+# Define continuous range for voltage
+VOLTAGE_MIN = 0.1
+VOLTAGE_MAX = 4.9
+
 
 class ConfigurationManager:
     """Manages configuration generation and validation"""
@@ -21,17 +24,17 @@ class ConfigurationManager:
         self.fixed_first_layer = list(range(33, 40))
     
     def generate_random_config(self) -> Dict[str, float]:
-        """Generate a random configuration with improved diversity"""
+        """Generate a random configuration with continuous voltage values."""
         config = {
-            str(h): random.choice(VOLTAGE_OPTIONS) 
+            str(h): round(random.uniform(VOLTAGE_MIN, VOLTAGE_MAX), 3) 
             for h in self.modifiable_heaters
         }
-        # More diverse initialization for fixed layer
         config.update({
-            str(h): random.choice([0.01, 0.1, 0.5]) 
+            str(h): round(random.uniform(0.01, 0.5), 3)
             for h in self.fixed_first_layer
         })
         return config
+
 
 class HardwareInterface:
     """Manages hardware communication"""
@@ -174,33 +177,45 @@ class GeneticOptimizer:
         
         return child1, child2
     
-    def adaptive_mutation(self, config: Dict[str, float], 
-                        rate: float, 
-                        generation: int) -> Dict[str, float]:
-        """Mutation with temperature-based exploration"""
+    def adaptive_mutation(self, config: Dict[str, float], rate: float, generation: int) -> Dict[str, float]:
         result = config.copy()
-        
-        # Temperature factor decreases from 1.0 to 0.1 over generations
         temperature = max(1.0 - (generation / 50), 0.1)
         
         for heater in self.config_manager.modifiable_heaters:
-            # Higher temperature = higher chance of mutation
             if random.random() < rate * temperature:
-                if random.random() < temperature:
-                    # High temperature: completely random choice
-                    result[str(heater)] = random.choice(VOLTAGE_OPTIONS)
+                current_value = result[str(heater)]
+                
+                if random.random() < 0.5:
+                    # Global exploration: completely random value
+                    result[str(heater)] = round(random.uniform(VOLTAGE_MIN, VOLTAGE_MAX), 3)
                 else:
-                    # Low temperature: local search
-                    current_idx = VOLTAGE_OPTIONS.index(result[str(heater)])
-                    max_step = max(1, int(len(VOLTAGE_OPTIONS) * temperature))
-                    new_idx = max(0, min(
-                        len(VOLTAGE_OPTIONS) - 1,
-                        current_idx + random.randint(-max_step, max_step)
-                    ))
-                    result[str(heater)] = VOLTAGE_OPTIONS[new_idx]
+                    # Local refinement: small adjustments
+                    delta = random.uniform(-0.1, 0.1)  # Small change
+                    new_value = max(VOLTAGE_MIN, min(VOLTAGE_MAX, current_value + delta))
+                    result[str(heater)] = round(new_value, 3)
         
         return result
     
+    def local_refinement(self, config: Dict[str, float]) -> Dict[str, float]:
+        refined_config = config.copy()
+        for heater, value in refined_config.items():
+            # Small adjustments to improve separation
+            best_value = value
+            best_score = self.evaluate_configuration(refined_config)
+            
+            for delta in [-0.05, 0.05]:  # Test small changes
+                new_value = max(VOLTAGE_MIN, min(VOLTAGE_MAX, value + delta))
+                refined_config[heater] = round(new_value, 3)
+                score = self.evaluate_configuration(refined_config)
+                if score > best_score:
+                    best_value, best_score = new_value, score
+            
+            refined_config[heater] = best_value
+        
+        return refined_config
+
+
+
     def optimize(self, 
                 pop_size: int = 40,
                 generations: int = 50,
