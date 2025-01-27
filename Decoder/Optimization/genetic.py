@@ -12,13 +12,6 @@ import numpy as np
 SERIAL_PORT = 'COM4'
 BAUD_RATE = 115200
 CACHE_SIZE = 1024
-<<<<<<< HEAD
-=======
-# Create voltage options from 0.1 to 4.9 with 0.1 step
-VOLTAGE_OPTIONS = [round(v/10, 1) for v in range(1, 50)]
-# This gives us: [0.1, 0.2, 0.3, ..., 4.8, 4.9]
-
->>>>>>> 94ca373c3bf1095beacd4b09dde8c22444170aad
 INPUT_COMBINATIONS = [(0.1, 0.1), (0.1, 4.9), (4.9, 0.1), (4.9, 4.9)]
 # Define continuous range for voltage
 VOLTAGE_MIN = 0.1
@@ -172,21 +165,13 @@ class GeneticOptimizer:
         
         return child1, child2
     
-<<<<<<< HEAD
     def adaptive_mutation(self, config: Dict[str, float], rate: float, generation: int) -> Dict[str, float]:
-=======
-    
-    def adaptive_mutation(self, config: Dict[str, float], 
-                    rate: float, 
-                    generation: int) -> Dict[str, float]:
->>>>>>> 94ca373c3bf1095beacd4b09dde8c22444170aad
         result = config.copy()
         temperature = max(1.0 - (generation / 50), 0.1)
         
         for heater in self.config_manager.modifiable_heaters:
             if random.random() < rate * temperature:
                 current_value = result[str(heater)]
-<<<<<<< HEAD
                 
                 if random.random() < 0.5:
                     # Global exploration: completely random value
@@ -218,21 +203,6 @@ class GeneticOptimizer:
         return refined_config
 
 
-=======
-                if random.random() < temperature:
-                    # Global exploration: completely random value
-                    result[str(heater)] = random.choice(VOLTAGE_OPTIONS)
-                else:
-                    # Local exploration: move up/down by small steps
-                    current_idx = VOLTAGE_OPTIONS.index(current_value)
-                    # Number of steps to move scales with temperature
-                    max_steps = max(1, int(10 * temperature))  # At most 10 steps (1V) early on
-                    step = random.randint(-max_steps, max_steps)
-                    new_idx = max(0, min(len(VOLTAGE_OPTIONS)-1, current_idx + step))
-                    result[str(heater)] = VOLTAGE_OPTIONS[new_idx]
-        
-        return result
->>>>>>> 94ca373c3bf1095beacd4b09dde8c22444170aad
 
     def optimize(self, 
                 pop_size: int = 40,
