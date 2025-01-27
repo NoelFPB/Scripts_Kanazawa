@@ -11,9 +11,7 @@ import numpy as np
 SERIAL_PORT = 'COM4'
 BAUD_RATE = 115200
 CACHE_SIZE = 1024
-# Create voltage options from 0.1 to 4.9 with 0.1 step
-VOLTAGE_OPTIONS = [round(v/10, 1) for v in range(1, 50)]
-# This gives us: [0.1, 0.2, 0.3, ..., 4.8, 4.9]
+VOLTAGE_OPTIONS = [round(v/10, 1) for v in range(1, 50)] # This gives us: [0.1, 0.2, 0.3, ..., 4.8, 4.9]
 INPUT_HEATERS = [36, 37]
 EXPECTED_OUTPUTS = [
     [1, 0, 0, 0],  # For input (0.1, 0.1) -> strongest on channel 1
@@ -21,7 +19,6 @@ EXPECTED_OUTPUTS = [
     [0, 0, 1, 0],  # For input (4.9, 0.1) -> strongest on channel 3
     [0, 0, 0, 1],  # For input (4.9, 4.9) -> strongest on channel 4
 ]
-
 INPUT_COMBINATIONS = [(0.1, 0.1), (0.1, 4.9), (4.9, 0.1), (4.9, 4.9)]
 INPUT_STATES = [(0.1, 0.1), (0.1, 4.9), (4.9, 0.1), (4.9, 4.9)]
 MODIFIABLE_HEATERS = [i for i in range(40)]
@@ -74,9 +71,6 @@ class HardwareInterface:
         """Clean up hardware connections"""
         self.ser.close()
         self.scope.close()
-
-
-
 
     def evaluate_config(self, config, input_state):
         """Evaluate single configuration with given input state"""
@@ -254,7 +248,7 @@ your_good_config = {'0': 3.6, '1': 2.0, '2': 3.2, '3': 0.8, '4': 3.6, '5': 2.6, 
 hardware = HardwareInterface()
         
 
-# tuned_config, final_score = tune_configuration(
+# tuned_config, final_score = tune_co nfiguration(
 #     initial_config=your_good_config,
 #     hardware=hardware,
 #     num_iterations=100,  # Adjust as needed
@@ -268,3 +262,4 @@ tuned_config, final_loss = tune_with_spsa(
     delta=0.1,         # Smaller perturbations for fine-tuning
     learning_rate=0.01  # Smaller steps for fine-tuning
 )
+

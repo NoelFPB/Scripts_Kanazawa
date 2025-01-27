@@ -128,7 +128,7 @@ class GeneticOptimizer:
         other_outputs = outputs.copy()
         other_outputs.pop(actual_highest)
         separation = max_output - max(other_outputs)
-        bonus = min(separation * 5, 10)  # Cap bonus at 10 points
+        bonus = min(separation * 5, 15)  # Cap bonus at 10 points
      
         return score + bonus
 
@@ -291,10 +291,10 @@ def main():
         
         # Run optimization
         best_config, best_score = optimizer.optimize(
-            pop_size=35,
-            generations=40,
+            pop_size=60,
+            generations=55,
             base_mutation_rate=0.1,
-            early_stop=25
+            early_stop=35
         )
         
         print("\nOptimization Complete!")
