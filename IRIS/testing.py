@@ -21,7 +21,7 @@ class ConfigurationManager:
 
 class OscilloscopeController:
     def __init__(self):
-        self.channels = ['CHANnel1', 'CHANnel2', 'CHANnel3']
+        self.channels = ['CHANnel4', 'CHANnel3', 'CHANnel2']
         self.scope = None
 
     def connect_oscilloscope(self):
@@ -48,7 +48,7 @@ class OscilloscopeController:
     def measure_outputs(self):
         try:
             outputs = []
-            for channel in range(1, 4):
+            for channel in range(4, 1, -1): # Changed the order for the new scope, watch out for this.
                 value = float(self.scope.query(f':MEASure:STATistic:ITEM? CURRent,VMAX,CHANnel{channel}'))
                 outputs.append(round(value, 5))
             return outputs

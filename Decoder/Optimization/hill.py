@@ -34,7 +34,7 @@ for heater in fixed_first_layer:
     heater_values[heater] = 0.01
 
 # Voltage options - simplified set for faster convergence
-voltage_options = [0.1, 1.0, 2.0,3.0, 4.9]
+voltage_options = [0.1, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 4.9]
 
 def send_heater_values(ser, config):
     """Send heater values via serial connection"""
