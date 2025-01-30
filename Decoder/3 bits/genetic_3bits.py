@@ -126,8 +126,7 @@ class DecoderOptimizer:
         self.serial.write(message.encode())
         self.serial.flush()
         self.serial.reset_input_buffer()
-        self.serial.reset_output_buffer()
-        time.sleep(0.01)
+        self.serial.reset_output_buffer()    
 
     def evaluate_individual(self, individual):
         """Evaluate a single individual's fitness"""
