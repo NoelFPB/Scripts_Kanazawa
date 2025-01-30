@@ -221,9 +221,19 @@ class DecoderOptimizer:
 
     def tournament_selection(self, population, fitness_scores):
         """Select individual using tournament selection"""
-        tournament = random.sample(list(enumerate(fitness_scores)), TOURNAMENT_SIZE)
+        # Ensure tournament size does not exceed population size
+        tournament_size = min(TOURNAMENT_SIZE, len(population))  
+        
+        tournament = random.sample(list(enumerate(fitness_scores)), tournament_size)
         winner = max(tournament, key=lambda x: x[1])
+        
+        # Ensure valid index
+        if winner[0] >= len(population):
+            print(f"Warning: Tournament selection index {winner[0]} out of range. Selecting random individual.")
+            return random.choice(population)
+
         return population[winner[0]]
+
 
     def crossover(self, parent1, parent2):
         """Perform crossover with varied mixing"""
@@ -339,25 +349,40 @@ class DecoderOptimizer:
             # Partial reset when no progress
             if generations_without_improvement >= 15:
                 print("\nResetting 50% of the population for exploration!")
-                population = sorted_pop[:ELITE_SIZE] + [self.create_individual() for _ in range(POPULATION_SIZE // 2)]
+                
+                sorted_pop = [x for _, x in sorted(zip(fitness_scores, population), key=lambda pair: pair[0], reverse=True)]
+                elite_individuals = sorted_pop[:ELITE_SIZE]
+                
+                # Ensure the population size remains correct
+                num_new_individuals = POPULATION_SIZE - ELITE_SIZE
+                new_population = elite_individuals + [self.create_individual() for _ in range(num_new_individuals)]
+                
+                # Ensure population size remains consistent
+                assert len(new_population) == POPULATION_SIZE, f"Population size mismatch: {len(new_population)} vs {POPULATION_SIZE}"
+                
+                population = new_population
+                generations_without_improvement = 0  # Reset counter
 
-            # Create new population
-            new_population = []
-            
             # Elitism - carry over best individuals
             sorted_pop = [x for _, x in sorted(zip(fitness_scores, population), 
                                              key=lambda pair: pair[0], 
                                              reverse=True)]
             new_population.extend(sorted_pop[:ELITE_SIZE])
             
-            # Fill rest of population with crossover and mutation
+            # Ensure the population is large enough before selecting parents
             while len(new_population) < POPULATION_SIZE:
+                if len(population) < 2:
+                    print("Warning: Not enough individuals for crossover. Adding random individuals.")
+                    new_population.append(self.create_individual())
+                    continue
+
                 parent1 = self.tournament_selection(population, fitness_scores)
                 parent2 = self.tournament_selection(population, fitness_scores)
                 
                 child = self.crossover(parent1, parent2)
                 child = self.mutate(child)
                 new_population.append(child)
+
             
             population = new_population
             
