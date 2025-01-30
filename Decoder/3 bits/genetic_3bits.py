@@ -333,11 +333,11 @@ class DecoderOptimizer:
                   f"{current_min:10.2f} {diversity:10.2f} {generations_without_improvement:8d} "
                   f"{generation_time:10.2f} {total_time:10.2f}")
             
-            # Early stopping if no improvement for many generations
-            if generations_without_improvement >= 20:
-                print("\nNo significant improvement for 20 generations. Stopping early.")
-                break
-            
+            # Partial reset when no progress
+            if generations_without_improvement >= 15:
+                print("\nResetting 50% of the population for exploration!")
+                population = sorted_pop[:ELITE_SIZE] + [self.create_individual() for _ in range(POPULATION_SIZE // 2)]
+
             # Create new population
             new_population = []
             
@@ -359,10 +359,13 @@ class DecoderOptimizer:
             population = new_population
             
             # Adjust mutation rate based on diversity
-            if diversity < 0.2:
-                self.mutation_rate = min(0.4, self.mutation_rate * 1.1)
-            elif diversity > 0.5:
-                self.mutation_rate = max(0.1, self.mutation_rate * 0.9)
+            if generations_without_improvement > 10:  # If stuck
+                self.mutation_rate = 0.5  # Drastically increase mutations
+            elif diversity < 0.3:
+                self.mutation_rate = min(0.35, self.mutation_rate * 1.2)  # Increase exploration
+            elif diversity > 0.6:
+                self.mutation_rate = max(0.05, self.mutation_rate * 0.8)  # Reduce mutations
+
         
         total_time = (time.time() - total_start_time) / 60.0
         print("\nOptimization completed!")
