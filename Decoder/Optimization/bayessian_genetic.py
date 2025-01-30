@@ -54,6 +54,43 @@ class HardwareInterface:
         self.scope.timeout = 5000
         
         self._setup_channels()
+
+    def evaluate_single_input(self, config_str: str, input_state: tuple) -> float:
+        config = json.loads(config_str)
+        config["36"] = input_state[0]
+        config["37"] = input_state[1]
+        
+        self.send_heater_values(config)
+        outputs = self.measure_outputs()
+        
+        if None in outputs:
+            return -10.0
+        
+        # Get target channel and highest output
+        target_idx = {
+            (0.1, 0.1): 0,
+            (0.1, 4.9): 1,
+            (4.9, 0.1): 2,  # Channel 3 for high-low
+            (4.9, 4.9): 3   # Channel 4 for high-high
+        }[input_state]
+        
+        max_output = max(outputs)
+        actual_highest = outputs.index(max_output)
+        
+        # If wrong channel is highest, return negative score
+        if actual_highest != target_idx:
+            return -20.0  # Penalty for wrong channel
+            
+        # Base score for correct channel
+        score = 10
+        
+        # Bonus points for separation ONLY if correct channel
+        other_outputs = outputs.copy()
+        other_outputs.pop(actual_highest)
+        separation = max_output - max(other_outputs)
+        bonus = min(separation * 5, 15)  # Cap bonus at 10 points
+        return score + bonus
+
     
     def _setup_channels(self):
         """Configure oscilloscope channels"""
@@ -67,7 +104,7 @@ class HardwareInterface:
         voltage_message = "".join(f"{h},{v};" for h, v in config.items()) + '\n'
         self.ser.write(voltage_message.encode())
         self.ser.flush()
-        time.sleep(0.2)  # Reduced delay 
+        time.sleep(0.25)  # Reduced delay 
         self.ser.reset_input_buffer()
         self.ser.reset_output_buffer()
     
@@ -105,7 +142,6 @@ class HybridOptimizer:
         self.best_config = None
         self.best_score = float('-inf')
 
-    # Genetic Algorithm
     def genetic_algorithm(self, pop_size: int, generations: int) -> List[Dict[str, float]]:
         population = [
             self.config_manager.generate_random_config() 
@@ -113,14 +149,25 @@ class HybridOptimizer:
         ]
         
         for generation in range(generations):
+            print(f"Generation {generation}")
             fitness = [self.evaluate_configuration(config) for config in population]
             
-            # Update best configuration
+            # Add diversity check
+            unique_configs = set(json.dumps(config, sort_keys=True) for config in population)
+            if len(unique_configs) < pop_size * 0.5:  # If population diversity is too low
+                # Inject new random individuals
+                num_new = int(pop_size * 0.2)
+                population[-num_new:] = [
+                    self.config_manager.generate_random_config() 
+                    for _ in range(num_new)
+                ]
+                # Update best configuration
             max_idx = np.argmax(fitness)
             if fitness[max_idx] > self.best_score:
                 self.best_score = fitness[max_idx]
                 self.best_config = population[max_idx]
-            
+                print(f"New best score found: {self.best_score:.2f}")  # Added best score notification
+        
             # Select parents
             top_performers = [
                 population[i] for i in np.argsort(fitness)[-pop_size//2:]
@@ -141,10 +188,14 @@ class HybridOptimizer:
 
     def evaluate_configuration(self, config: Dict[str, float]) -> float:
         config_str = json.dumps(config, sort_keys=True)
-        return sum(
-            self.hardware.evaluate_single_input(config_str, input_state) 
-            for input_state in INPUT_COMBINATIONS
-        ) / len(INPUT_COMBINATIONS)
+        scores = [self.hardware.evaluate_single_input(config_str, input_state) 
+                for input_state in INPUT_COMBINATIONS]
+        average_score = sum(scores) / len(scores)
+        print(f"Configuration evaluation results:")
+        for input_state, score in zip(INPUT_COMBINATIONS, scores):
+            print(f"  Input {input_state}: {score:.2f}")
+        print(f"  Average score: {average_score:.2f}")
+        return average_score
 
     def crossover(self, parent1: Dict[str, float], parent2: Dict[str, float]) -> Tuple[Dict[str, float], Dict[str, float]]:
         child1, child2 = {}, {}
@@ -156,40 +207,80 @@ class HybridOptimizer:
                 child1[str(h)] = parent2[str(h)]
                 child2[str(h)] = parent1[str(h)]
         return child1, child2
-
+    
     def mutate(self, config: Dict[str, float], generation: int) -> Dict[str, float]:
         result = config.copy()
-        temperature = max(1.0 - (generation / GENERATION_LIMIT), 0.1)
+        temperature = max(1.0 - (generation / GENERATION_LIMIT), 0.3)  # Higher minimum temperature
+        base_mutation_rate = 0.2  # Increased from 0.1
         for h in range(NUM_HEATERS):
-            if random.random() < 0.1 * temperature:
-                result[str(h)] = round(random.uniform(VOLTAGE_MIN, VOLTAGE_MAX), 3)
+            if random.random() < base_mutation_rate * temperature:
+                # Add Gaussian noise instead of uniform random
+                current_value = result[str(h)]
+                noise = random.gauss(0, temperature * (VOLTAGE_MAX - VOLTAGE_MIN) / 4)
+                new_value = max(VOLTAGE_MIN, min(VOLTAGE_MAX, current_value + noise))
+                result[str(h)] = round(new_value, 3)
         return result
 
-    # Bayesian Optimization
     def bayesian_optimization(self, initial_population: List[Dict[str, float]]) -> Tuple[Dict[str, float], float]:
+        print(f"\nStarting Bayesian Optimization with {len(initial_population)} initial points")    
         space = [Real(VOLTAGE_MIN, VOLTAGE_MAX, name=f"h{i}") for i in range(NUM_HEATERS)]
-
+        iteration_count = 0
+        best_score_so_far = float('-inf')
+        best_config_so_far = None
+        
+        # Keep track of good configurations and their scores
+        good_configs = []
+        good_scores = []
+        
         @use_named_args(space)
         def objective(**config_list):
+            nonlocal iteration_count, best_score_so_far, best_config_so_far
+            iteration_count += 1
+            print(f"\nBayesian Optimization Iteration {iteration_count}/50")
+            
             config = list_to_config([config_list[f"h{i}"] for i in range(NUM_HEATERS)])
-            return -self.evaluate_configuration(config)  # Negative for minimization
+            score = self.evaluate_configuration(config)
+            
+            # Store good configurations (those with positive scores)
+            if score > 0:
+                good_configs.append(config)
+                good_scores.append(score)
+            
+            # Update best seen configuration
+            if score > best_score_so_far:
+                best_score_so_far = score
+                best_config_so_far = config
+                print(f"New best score: {score}")
+            
+            return -score  # Negative for minimization
 
         # Convert initial population to list format
         initial_points = [config_to_list(config) for config in initial_population]
 
-        # Run Bayesian Optimization
+        # Run Bayesian Optimization with enhanced parameters
         res = gp_minimize(
             func=objective,
             dimensions=space,
             n_calls=50,
             n_initial_points=len(initial_points),
-            x0=initial_points
+            x0=initial_points,
+            # Added parameters for better exploration/exploitation balance
+            noise=0.1,  # Account for measurement noise
+            n_random_starts=5,  # More random exploration initially
+            acq_func='EI',  # Expected Improvement acquisition function
+            acq_func_kwargs={'xi': 0.1},  # Decreased exploration tendency
+            n_jobs=1,  # Ensure sequential evaluation
+            callback=lambda res: print(f"Current minimum: {-res.fun}"),
         )
 
-        # Return best configuration
-        best_config = list_to_config(res.x)
-        best_score = -res.fun  # Convert back to positive score
-        return best_config, best_score
+        # If the final result is worse than our best seen configuration,
+        # return the best seen instead
+        final_config = list_to_config(res.x)
+        final_score = -res.fun
+        
+        if best_score_so_far > final_score:
+            return best_config_so_far, best_score_so_far
+        return final_config, final_score
 
     # Hybrid Optimization
     def optimize(self, pop_size: int, ga_generations: int) -> Tuple[Dict[str, float], float]:
@@ -211,22 +302,18 @@ class HybridOptimizer:
 
 # Main Function
 def main():
-    try:
-        print("Starting Hybrid Optimization...")
-        config_manager = ConfigurationManager()
-        hardware = HardwareInterface()
-        optimizer = HybridOptimizer(hardware, config_manager)
 
-        best_config, best_score = optimizer.optimize(pop_size=40, ga_generations=25)
+    print("Starting Hybrid Optimization...")
+    config_manager = ConfigurationManager()
+    hardware = HardwareInterface()
+    optimizer = HybridOptimizer(hardware, config_manager)
 
-        print("\nOptimization Complete!")
-        print(f"Best Score: {best_score}")
-        print(f"Best Configuration: {best_config}")
-    
-    except Exception as e:
-        print(f"Error: {e}")
-    finally:
-        hardware.cleanup()
+    best_config, best_score = optimizer.optimize(pop_size=20, ga_generations=45)
+
+    print("\nOptimization Complete!")
+    print(f"Best Score: {best_score}")
+    print(f"Best Configuration: {best_config}")
+
 
 
 if __name__ == "__main__":

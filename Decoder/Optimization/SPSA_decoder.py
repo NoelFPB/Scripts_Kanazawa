@@ -53,7 +53,8 @@ class DecoderOptimizer:
         self.serial.flush()
         self.serial.reset_input_buffer()
         self.serial.reset_output_buffer()
-        time.sleep(0.01)
+     
+
 
     def evaluate_config(self, config, input_state):
         """Evaluate single configuration with given input state"""
@@ -71,20 +72,47 @@ class DecoderOptimizer:
         
         return probs
 
-    def calculate_loss(self, probs, target_idx):
-        """Calculate cross-entropy loss for single sample"""
-        target = np.zeros(4)
-        target[target_idx] = 1
-        loss = -np.sum(target * np.log(probs + 1e-10))
-        #print(loss)
-        return loss
+    # def calculate_loss(self, probs, target_idx):
+    #     """Calculate cross-entropy loss for single sample"""
+    #     target = np.zeros(4)
+    #     target[target_idx] = 1
+    #     loss = -np.sum(target * np.log(probs + 1e-10))
+    #     #print(loss)
+    #     return loss
     
-    def optimize(self, iterations=100, delta=0.2, learning_rate=0.05):
+    def calculate_loss(self, raw_outputs, target_idx):
+        """Loss based on ratio of target voltage to max other voltage"""
+        target_voltage = raw_outputs[target_idx]
+        other_voltages = [v for i, v in enumerate(raw_outputs) if i != target_idx]
+        max_other_voltage = max(other_voltages)
+        
+        ratio = max_other_voltage / (target_voltage + 1e-10)  # Add small epsilon to avoid division by zero
+        return ratio  # A smaller ratio means better separation
+        
+    def calculate_batch_loss(self, config):
+        total_loss = 0
+        for input_state, target_dist in zip(INPUT_STATES, EXPECTED_OUTPUTS):
+            # Evaluate the configuration for the current input state
+            probs = self.evaluate_config(config, input_state)
+            # Calculate the loss for the current state
+            total_loss += self.calculate_loss(probs, np.argmax(target_dist))
+        # Return the average loss across all input states
+        return total_loss / len(INPUT_STATES)
+    
+    def optimize(self, iterations=100, initial_delta=0.2, initial_learning_rate=0.05, decay_rate = 50):
         w = {h: random.uniform(0.1, 4.9) for h in MODIFIABLE_HEATERS}
+        delta = initial_delta
+        learning_rate = initial_learning_rate
         best_config = w.copy()
         best_loss = float('inf')
+        a = 0
+        current_best = 0
         
         for iteration in range(iterations):
+            if delta > 0.11:
+                delta /= (1 + iteration/ decay_rate)
+                learning_rate /= (1 + iteration/ decay_rate)
+
             # Generate perturbation vector
             delta_vector = {h: random.choice([-1, 1]) for h in MODIFIABLE_HEATERS}
             
@@ -97,14 +125,11 @@ class DecoderOptimizer:
             L_plus = 0
             L_minus = 0
             
-            for input_state, target_dist in zip(INPUT_STATES, EXPECTED_OUTPUTS):
-                # Evaluate w_plus configuration
-                probs_plus = self.evaluate_config(w_plus, input_state)
-                L_plus += self.calculate_loss(probs_plus, target_dist)
-                
-                # Evaluate w_minus configuration
-                probs_minus = self.evaluate_config(w_minus, input_state)
-                L_minus += self.calculate_loss(probs_minus, target_dist)
+            # Evaluate w_plus configuration
+            L_plus += self.calculate_batch_loss(w_plus)
+            
+            # Evaluate w_minus configuration
+            L_minus += self.calculate_batch_loss(w_minus)
 
             # Average the losses
             L_plus /= len(INPUT_STATES)
@@ -115,11 +140,24 @@ class DecoderOptimizer:
                 gradient = (L_plus - L_minus) / (2 * delta * delta_vector[h])
                 w[h] -= learning_rate * gradient
                 w[h] = min(max(w[h], 0.1), 4.9)
-             
-            current_best = min(best_loss, L_plus, L_minus)
-            loss_now = min(L_minus, L_plus)
-            print(f"Iteration {iteration + 1}: Best loss = {current_best:.4f} Current loss = {loss_now:.4f}")
 
+            previous_best = current_best 
+            current_best = min(best_loss, L_plus, L_minus)
+            #print(previous_best)
+            #print(current_best)
+            if delta < 0.11:
+                if previous_best == current_best:
+                    a+=1
+                    print(a)
+                    if a > 5:
+                        delta+=0.5
+                        learning_rate+=0.05
+                        a = 0
+                else:
+                    a = 0
+            loss_now = min(L_minus, L_plus)
+            print(f"Iteration {iteration + 1}: Best loss = {current_best:.4f} Current loss = {loss_now:.4f} Delta {delta:.3f}, Learnign Rate {learning_rate:.3f}")
+            
             if L_plus < best_loss:
                 best_loss = L_plus
                 best_config = w_plus.copy()
@@ -140,9 +178,10 @@ def main():
     optimizer = DecoderOptimizer()
     try:
         print("Starting SPSA optimization...")
-        best_config, best_loss = optimizer.optimize(iterations=500, 
-                                                    delta=0.5, 
-                                                    learning_rate=0.4)
+        best_config, best_loss = optimizer.optimize(iterations=100, 
+                                                    initial_delta=0.7, 
+                                                    initial_learning_rate=0.3,
+                                                    decay_rate=500)
         
         print(f"\nOptimization complete! Final loss: {best_loss:.4f}")
         clean_config = optimizer.format_config(best_config)
@@ -155,7 +194,7 @@ def main():
             current_config[37] = input_state[1]
             
             optimizer.send_heater_values(current_config)
-            time.sleep(0.2)
+            time.sleep(0.25)
             outputs = optimizer.measure_outputs()
             
             max_output = max(outputs)

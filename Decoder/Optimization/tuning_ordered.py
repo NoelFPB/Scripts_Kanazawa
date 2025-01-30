@@ -156,8 +156,7 @@ def optimize_spsa(ser: serial.Serial, scope: pyvisa.resources.Resource,
                 best_config = config_plus.copy() if loss_plus < loss_minus else config_minus.copy()
                 print(f"New best loss: {best_loss:.4f} at iteration {iteration + 1}")
             
-            if iteration % 5 == 0:
-                print(f"Iteration {iteration + 1}: Current loss = {current_loss:.4f}")
+            print(f"Iteration {iteration + 1}: Current loss = {current_loss:.4f}")
                 
     except KeyboardInterrupt:
         print("\nOptimization interrupted by user")
