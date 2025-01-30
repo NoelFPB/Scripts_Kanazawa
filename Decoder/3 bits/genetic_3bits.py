@@ -3,7 +3,9 @@ import serial
 import time
 import pyvisa
 import random
-
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from queue import Queue
 # Serial port and core configuration
 SERIAL_PORT = 'COM4'
 BAUD_RATE = 115200
@@ -56,19 +58,64 @@ class DecoderOptimizer:
         
         return scopes
 
-    def measure_outputs(self):
-        """Measure outputs from both oscilloscopes"""
+
+
+    def measure_scope(self, scope_idx, output_queue):
+        """Measure outputs from a single scope"""
         try:
+            scope = self.scopes[scope_idx]
             outputs = []
-            # First scope - all 4 channels
-            for channel in range(1, 5):
-                value = float(self.scopes[0].query(f':MEASure:STATistic:ITEM? CURRent,VMAX,CHANnel{channel}'))
+            
+            # First scope has 4 channels, second has 3
+            num_channels = 4 if scope_idx == 0 else 3
+            
+            for channel in range(1, num_channels + 1):
+                value = float(scope.query(f':MEASure:STATistic:ITEM? CURRent,VMAX,CHANnel{channel}'))
                 outputs.append(round(value, 5))
-            # Second scope - first 3 channels only
-            for channel in range(1, 4):
-                value = float(self.scopes[1].query(f':MEASure:STATistic:ITEM? CURRent,VMAX,CHANnel{channel}'))
-                outputs.append(round(value, 5))
-            return outputs
+            
+            output_queue.put((scope_idx, outputs))
+        except Exception as e:
+            print(f"Error measuring scope {scope_idx}: {e}")
+            output_queue.put((scope_idx, [None] * (4 if scope_idx == 0 else 3)))
+
+    def measure_outputs(self):
+        """Measure outputs from both oscilloscopes in parallel"""
+        try:
+            #measure_start = time.time()
+            output_queue = Queue()
+            threads = []
+            
+            # Start measurement threads for both scopes
+            for scope_idx in range(2):
+                thread = threading.Thread(target=self.measure_scope, 
+                                       args=(scope_idx, output_queue))
+                threads.append(thread)
+                thread.start()
+            
+            # Wait for both threads to complete
+            for thread in threads:
+                thread.join()
+            
+            # Collect results
+            all_outputs = []
+            scope_results = {}
+            
+            # Get results from queue
+            while not output_queue.empty():
+                scope_idx, outputs = output_queue.get()
+                scope_results[scope_idx] = outputs
+            
+            # Combine results in correct order
+            if 0 in scope_results and 1 in scope_results:
+                all_outputs.extend(scope_results[0])  # First scope (4 channels)
+                all_outputs.extend(scope_results[1])  # Second scope (3 channels)
+                #total_time = time.time() - measure_start
+                #print(f"Parallel measurement time: {total_time:.3f}s")
+                return all_outputs
+            else:
+                print("Error: Missing results from one or both scopes")
+                return [None] * 7
+                
         except Exception as e:
             print(f"Measurement error: {e}")
             return [None] * 7
@@ -197,17 +244,25 @@ class DecoderOptimizer:
         return child
 
     def mutate(self, individual):
-        """Perform mutation on an individual"""
+        """Enhanced mutation with adaptive rates"""
         mutated = individual.copy()
         
         for heater in self.modifiable_heaters:
-            if heater not in self.fixed_first_layer and random.random() < MUTATION_RATE:
-                # Add random perturbation
-                delta = random.uniform(-0.5, 0.5)
+            if heater not in self.fixed_first_layer and random.random() < self.mutation_rate:
+                mutation_type = random.random()
                 current_value = mutated[heater]
-                new_value = round(min(max(current_value + delta, 0.1), 4.9), 2)
-                mutated[heater] = new_value
                 
+                if mutation_type < 0.4:  # Gaussian mutation
+                    delta = random.gauss(0, 0.5)
+                    new_value = current_value + delta
+                elif mutation_type < 0.7:  # Uniform mutation
+                    delta = random.uniform(-0.5, 0.5)
+                    new_value = current_value + delta
+                else:  # Reset mutation
+                    new_value = random.uniform(0.1, 4.9)
+                 
+                mutated[heater] = round(min(max(new_value, 0.1), 4.9), 2)
+        
         return mutated
 
     def optimize(self, generations=50):
@@ -224,6 +279,7 @@ class DecoderOptimizer:
         print(f"{'Gen':>4} {'Best':>10} {'Avg':>10} {'Min':>10} {'Pop Div':>10} {'No Imp':>8} {'Time (s)':>10} {'Total (m)':>10}")
         print("-" * 100)
         
+        
         total_start_time = time.time()
         
         for generation in range(generations):
@@ -231,8 +287,12 @@ class DecoderOptimizer:
             
             # Evaluate current population
             fitness_scores = []
-            for individual in population:
+            #print("\nStarting individual evaluations:")
+            for idx, individual in enumerate(population):
+                #ind_start = time.time()
                 fitness = self.evaluate_individual(individual)
+                #ind_time = time.time() - ind_start
+                #print(f"Individual {idx}: {ind_time:.2f}s")
                 fitness_scores.append(fitness)
             
             # Calculate statistics
@@ -324,7 +384,7 @@ def main():
     optimizer = DecoderOptimizer()
     try:
         print("Starting 3-bit decoder optimization using genetic algorithm...")
-        best_config, best_fitness = optimizer.optimize(generations=50)
+        best_config, best_fitness = optimizer.optimize(generations=500)
         
         print(f"\nOptimization complete! Final fitness: {best_fitness:.2f}")
         print("\nBest Heater Configuration:")
