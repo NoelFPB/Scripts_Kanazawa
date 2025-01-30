@@ -292,7 +292,6 @@ class DecoderOptimizer:
         print(f"{'Gen':>4} {'Best':>10} {'Avg':>10} {'Min':>10} {'Pop Div':>10} {'No Imp':>8} {'Time (s)':>10} {'Total (m)':>10}")
         print("-" * 100)
         
-        
         total_start_time = time.time()
         
         for generation in range(generations):
@@ -300,12 +299,8 @@ class DecoderOptimizer:
             
             # Evaluate current population
             fitness_scores = []
-            #print("\nStarting individual evaluations:")
             for idx, individual in enumerate(population):
-                #ind_start = time.time()
                 fitness = self.evaluate_individual(individual)
-                #ind_time = time.time() - ind_start
-                #print(f"Individual {idx}: {ind_time:.2f}s")
                 fitness_scores.append(fitness)
             
             # Calculate statistics
@@ -343,47 +338,48 @@ class DecoderOptimizer:
             
             # Print status
             print(f"{generation:4d} {best_fitness:10.2f} {current_avg:10.2f} "
-                  f"{current_min:10.2f} {diversity:10.2f} {generations_without_improvement:8d} "
-                  f"{generation_time:10.2f} {total_time:10.2f}")
+                f"{current_min:10.2f} {diversity:10.2f} {generations_without_improvement:8d} "
+                f"{generation_time:10.2f} {total_time:10.2f}")
+            
+            # Initialize new population for next generation
+            new_population = []
             
             # Partial reset when no progress
             if generations_without_improvement >= 15:
                 print("\nResetting 50% of the population for exploration!")
                 
-                sorted_pop = [x for _, x in sorted(zip(fitness_scores, population), key=lambda pair: pair[0], reverse=True)]
-                elite_individuals = sorted_pop[:ELITE_SIZE]
+                sorted_pop = [x for _, x in sorted(zip(fitness_scores, population), 
+                                                key=lambda pair: pair[0], 
+                                                reverse=True)]
+                new_population = sorted_pop[:ELITE_SIZE]
                 
-                # Ensure the population size remains correct
+                # Add new random individuals
                 num_new_individuals = POPULATION_SIZE - ELITE_SIZE
-                new_population = elite_individuals + [self.create_individual() for _ in range(num_new_individuals)]
+                new_population.extend([self.create_individual() for _ in range(num_new_individuals)])
                 
-                # Ensure population size remains consistent
-                assert len(new_population) == POPULATION_SIZE, f"Population size mismatch: {len(new_population)} vs {POPULATION_SIZE}"
+            else:
+                # Regular evolution step
+                # Elitism - carry over best individuals
+                sorted_pop = [x for _, x in sorted(zip(fitness_scores, population), 
+                                                key=lambda pair: pair[0], 
+                                                reverse=True)]
+                new_population.extend(sorted_pop[:ELITE_SIZE])
                 
-                population = new_population
-                generations_without_improvement = 0  # Reset counter
+                # Generate rest of new population through selection, crossover, and mutation
+                while len(new_population) < POPULATION_SIZE:
+                    if len(population) < 2:
+                        print("Warning: Not enough individuals for crossover. Adding random individuals.")
+                        new_population.append(self.create_individual())
+                        continue
 
-            # Elitism - carry over best individuals
-            sorted_pop = [x for _, x in sorted(zip(fitness_scores, population), 
-                                             key=lambda pair: pair[0], 
-                                             reverse=True)]
-            new_population.extend(sorted_pop[:ELITE_SIZE])
+                    parent1 = self.tournament_selection(population, fitness_scores)
+                    parent2 = self.tournament_selection(population, fitness_scores)
+                    
+                    child = self.crossover(parent1, parent2)
+                    child = self.mutate(child)
+                    new_population.append(child)
             
-            # Ensure the population is large enough before selecting parents
-            while len(new_population) < POPULATION_SIZE:
-                if len(population) < 2:
-                    print("Warning: Not enough individuals for crossover. Adding random individuals.")
-                    new_population.append(self.create_individual())
-                    continue
-
-                parent1 = self.tournament_selection(population, fitness_scores)
-                parent2 = self.tournament_selection(population, fitness_scores)
-                
-                child = self.crossover(parent1, parent2)
-                child = self.mutate(child)
-                new_population.append(child)
-
-            
+            # Update population for next generation
             population = new_population
             
             # Adjust mutation rate based on diversity
@@ -394,7 +390,6 @@ class DecoderOptimizer:
             elif diversity > 0.6:
                 self.mutation_rate = max(0.05, self.mutation_rate * 0.8)  # Reduce mutations
 
-        
         total_time = (time.time() - total_start_time) / 60.0
         print("\nOptimization completed!")
         print(f"Final best fitness: {best_fitness:.2f}")
@@ -404,7 +399,6 @@ class DecoderOptimizer:
         print("=" * 100)
         
         return best_individual, best_fitness
-
     def cleanup(self):
         """Clean up resources"""
         self.serial.close()
