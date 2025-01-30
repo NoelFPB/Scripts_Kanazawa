@@ -226,21 +226,24 @@ class DecoderOptimizer:
         return population[winner[0]]
 
     def crossover(self, parent1, parent2):
-        """Perform crossover between two parents"""
+        """Perform crossover with varied mixing"""
         if random.random() > CROSSOVER_RATE:
             return parent1.copy()
-            
+        
         child = {}
         for heater in self.modifiable_heaters:
             if heater in self.fixed_first_layer:
                 child[heater] = 0.01  # Maintain fixed layer
             else:
-                # Random weighted average of parents
-                weight = random.random()
-                value = weight * parent1[heater] + (1 - weight) * parent2[heater]
-                child[heater] = round(min(max(value, 0.1), 4.9), 2)
-        
+                if random.random() < 0.3:  # 30% chance to inherit directly
+                    child[heater] = parent1[heater] if random.random() < 0.5 else parent2[heater]
+                else:  # 70% chance to mix values
+                    weight = random.uniform(0.2, 0.8)  # More variability
+                    value = weight * parent1[heater] + (1 - weight) * parent2[heater]
+                    child[heater] = round(min(max(value, 0.1), 4.9), 2)
+
         return child
+
 
     def mutate(self, individual):
         """Enhanced mutation with adaptive rates"""
@@ -251,18 +254,19 @@ class DecoderOptimizer:
                 mutation_type = random.random()
                 current_value = mutated[heater]
                 
-                if mutation_type < 0.4:  # Gaussian mutation
-                    delta = random.gauss(0, 0.5)
+                if mutation_type < 0.3:  # Small Gaussian mutation
+                    delta = random.gauss(0, 0.2)  # Small adjustments
                     new_value = current_value + delta
-                elif mutation_type < 0.7:  # Uniform mutation
+                elif mutation_type < 0.6:  # Medium range mutation
                     delta = random.uniform(-0.5, 0.5)
                     new_value = current_value + delta
-                else:  # Reset mutation
+                else:  # Large reset mutation
                     new_value = random.uniform(0.1, 4.9)
-                 
+                
                 mutated[heater] = round(min(max(new_value, 0.1), 4.9), 2)
         
         return mutated
+
 
     def optimize(self, generations=50):
         """Run genetic algorithm optimization"""
