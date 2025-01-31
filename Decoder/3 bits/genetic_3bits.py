@@ -129,7 +129,7 @@ class DecoderOptimizer:
         self.serial.reset_output_buffer()    
 
     def evaluate_individual(self, individual):
-        """Evaluate a single individual's fitness"""
+        """Evaluate a single individual's fitness with improved gradient scoring"""
         expected_outputs = {
             (0.1, 0.1, 0.1): 0,  # 000
             (0.1, 0.1, 4.9): 1,  # 001
@@ -141,7 +141,8 @@ class DecoderOptimizer:
         }
         
         total_score = 0
-        min_separation = float('inf')  # Track worst-case separation
+        all_separations = []
+        all_voltages = []
         
         for input_state in INPUT_STATES:
             # Apply input state
@@ -156,61 +157,79 @@ class DecoderOptimizer:
             if None in outputs:
                 return -float('inf')
                 
-            # Find highest output
-            max_output = max(outputs)
-            actual_highest = outputs.index(max_output)
             expected_highest = expected_outputs[input_state]
+            expected_voltage = outputs[expected_highest]
             
-            # Calculate separation ratio for the expected output
+            # Store all voltages for later analysis
+            all_voltages.extend(outputs)
+            
+            # Calculate separations from all other outputs
             other_outputs = outputs.copy()
             other_outputs.pop(expected_highest)
+            
+            # Calculate separation metrics
             max_other = max(other_outputs)
-            separation_ratio = outputs[expected_highest] / (max_other + 1e-6)
+            separation = expected_voltage - max_other
+            relative_separation = expected_voltage / (max_other + 1e-6)
+            all_separations.append(separation)
             
-            # Update minimum separation seen
-            min_separation = min(min_separation, separation_ratio)
-            
-            # Score components
-            if actual_highest == expected_highest:
-                correct_bonus = 150  # Increased base score
+            # Base score for the correct output being highest
+            if outputs.index(max(outputs)) == expected_highest:
+                state_score = 50  # Base score for correct output
                 
-                # Enhanced separation quality scoring
-                if separation_ratio > 2.0:
-                    separation_quality = 100
-                elif separation_ratio > 1.5:
-                    separation_quality = 75
-                else:
-                    separation_quality = max(0, (separation_ratio - 1) * 60)
+                # Gradient-friendly separation scoring
+                separation_score = min(100, separation * 40)  # Linear scaling up to 2.5V separation
                 
-                # Better voltage quality scaling
-                if outputs[expected_highest] > 2.0:
-                    voltage_quality = 50
-                elif outputs[expected_highest] > 1.0:
-                    voltage_quality = 30
-                else:
-                    voltage_quality = max(0, outputs[expected_highest] * 25)
+                # Gradient-friendly voltage quality scoring
+                voltage_score = min(50, expected_voltage * 15)  # Linear scaling up to ~3.3V
                 
-                state_score = correct_bonus + separation_quality + voltage_quality
+                state_score += separation_score + voltage_score
                 
-                # Extra bonus for very clear separation
-                if separation_ratio > 2.5:
+                # Small bonus for exceeding thresholds
+                if separation > 2.5:
+                    state_score += 25
+                if expected_voltage > 3.0:
                     state_score += 25
             else:
-                # Penalty for incorrect output, but maintain some gradient
-                voltage_diff = outputs[expected_highest] - max_output
-                state_score = max(-50, voltage_diff * 10)  # Bounded penalty
+                # Gradient-friendly penalty that considers how close we were
+                ranking = sorted(range(len(outputs)), key=lambda k: outputs[k], reverse=True)
+                actual_rank = ranking.index(expected_highest)
+                
+                # Penalty scales with how far off we are in ranking
+                rank_penalty = -30 * (actual_rank + 1)
+                
+                # Add gradient based on voltage difference to encourage improvement
+                voltage_diff_score = (expected_voltage - max_other) * 20
+                
+                state_score = rank_penalty + voltage_diff_score
             
             total_score += state_score
         
-        # Global separation quality factor
-        separation_factor = max(0, (min_separation - 1) * 100)
-        total_score += separation_factor
+        # Global scoring components
+        avg_separation = sum(all_separations) / len(all_separations)
+        min_separation = min(all_separations)
         
-        # Penalize configurations with very low overall voltages
-        avg_voltage = sum(outputs) / len(outputs)
-        if avg_voltage < 0.5:  # Discourage solutions with very low voltages
-            total_score *= (avg_voltage * 2)  # Smooth scaling factor
-            
+        # Gradient-friendly global separation quality
+        separation_factor = min(150, avg_separation * 50)  # Linear scaling of average separation
+        min_separation_bonus = min(100, min_separation * 40)  # Reward for worst-case separation
+        
+        total_score += separation_factor + min_separation_bonus
+        
+        # Gradient-friendly voltage level scoring
+        avg_voltage = sum(all_voltages) / len(all_voltages)
+        if avg_voltage < 0.5:
+            # Smooth penalty for low voltages
+            voltage_penalty = (avg_voltage / 0.5) ** 2
+            total_score *= voltage_penalty
+        elif avg_voltage > 3.0:
+            # Small bonus for strong overall voltage levels
+            total_score += 50
+        
+        # Consistency bonus
+        voltage_std = (sum((v - avg_voltage) ** 2 for v in all_voltages) / len(all_voltages)) ** 0.5
+        consistency_score = min(100, max(0, (1.0 - voltage_std) * 100))
+        total_score += consistency_score
+        
         return total_score
 
     def create_individual(self):
