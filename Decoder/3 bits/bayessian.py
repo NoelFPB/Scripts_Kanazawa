@@ -6,6 +6,7 @@ import GPy
 import GPyOpt
 from concurrent.futures import ThreadPoolExecutor
 from queue import Queue
+import threading
 
 # Configuration
 SERIAL_PORT = 'COM4'
@@ -126,13 +127,26 @@ class BayesianDecoderOptimizer:
         # Convert array to dictionary format
         config = {}
         config_idx = 0
+        # Count actual parameters we need to optimize
+        num_optimize_params = len([h for h in self.modifiable_heaters if h not in self.fixed_first_layer])
+        
+        # Safety check for array size
+        if config_array.shape[1] != num_optimize_params:
+            print(f"Warning: Expected {num_optimize_params} parameters but got {config_array.shape[1]}")
+            return -1000.0
+        
         for heater in self.modifiable_heaters:
             if heater in self.fixed_first_layer:
                 config[heater] = 0.01
             else:
-                config[heater] = float(config_array[0][config_idx])
-                config_idx += 1
+                if config_idx < config_array.shape[1]:
+                    config[heater] = float(config_array[0][config_idx])
+                    config_idx += 1
+                else:
+                    print(f"Warning: Parameter index {config_idx} out of bounds")
+                    config[heater] = 0.1  # Default safe value
 
+        # Rest of the function remains the same
         total_score = 0
         min_separation = float('inf')
         all_outputs = []
@@ -222,9 +236,11 @@ class BayesianDecoderOptimizer:
     def optimize(self, max_iter=100):
         """Run Bayesian optimization"""
         # Define optimization space
-        num_params = len(self.modifiable_heaters) - len(self.fixed_first_layer)
+        num_params = len([h for h in self.modifiable_heaters if h not in self.fixed_first_layer])
+        print(f"Number of parameters to optimize: {num_params}")
+            
         bounds = [{'name': f'heater_{i}', 'type': 'continuous', 'domain': (0.1, 4.9)} 
-                 for i in range(num_params)]
+                    for i in range(num_params)]
         
         # Initialize optimizer
         optimizer = GPyOpt.methods.BayesianOptimization(
