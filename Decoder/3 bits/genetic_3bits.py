@@ -279,33 +279,33 @@ class DecoderOptimizer:
 
 
     def optimize(self, generations=50):
-        """Run genetic algorithm optimization"""
+        """Run genetic algorithm optimization with aggressive exploration"""
         population = self.create_initial_population()
         best_individual = None
         best_fitness = -float('inf')
         last_improvement_fitness = -float('inf')
         generations_without_improvement = 0
-        improvement_threshold = 1.0  # Minimum improvement to reset counter
+        improvement_threshold = 1.0
+        
+        # Track multiple populations
+        hall_of_fame = []
+        alternative_populations = []  # Store different promising populations
         
         print("\nStarting genetic algorithm optimization...")
         print("=" * 100)
         print(f"{'Gen':>4} {'Best':>10} {'Avg':>10} {'Min':>10} {'Pop Div':>10} {'No Imp':>8} {'Time (s)':>10} {'Total (m)':>10}")
         print("-" * 100)
         
-        
         total_start_time = time.time()
+        restart_count = 0
         
         for generation in range(generations):
             generation_start_time = time.time()
             
             # Evaluate current population
             fitness_scores = []
-            #print("\nStarting individual evaluations:")
             for idx, individual in enumerate(population):
-                #ind_start = time.time()
                 fitness = self.evaluate_individual(individual)
-                #ind_time = time.time() - ind_start
-                #print(f"Individual {idx}: {ind_time:.2f}s")
                 fitness_scores.append(fitness)
             
             # Calculate statistics
@@ -313,89 +313,140 @@ class DecoderOptimizer:
             current_avg = sum(fitness_scores) / len(fitness_scores)
             current_min = min(fitness_scores)
             
+            # Update hall of fame with diversity check
+            best_idx = fitness_scores.index(current_best)
+            current_best_individual = population[best_idx].copy()
+            
+            # Check if this solution is significantly different from existing ones
+            is_unique = True
+            for hof_ind, _ in hall_of_fame:
+                similarity = sum(abs(hof_ind[h] - current_best_individual[h]) 
+                            for h in self.modifiable_heaters) / len(self.modifiable_heaters)
+                if similarity < 0.5:  # If too similar to existing solution
+                    is_unique = False
+                    break
+            
+            if is_unique and (not hall_of_fame or current_best > hall_of_fame[0][1] - 50):
+                hall_of_fame.append((current_best_individual, current_best))
+                hall_of_fame.sort(key=lambda x: x[1], reverse=True)
+                hall_of_fame = hall_of_fame[:15]  # Keep more diverse solutions
+            
             # Calculate population diversity
             diversity = 0
             for heater in self.modifiable_heaters:
                 if heater not in self.fixed_first_layer:
                     values = [ind[heater] for ind in population]
                     mean_value = sum(values) / len(values)
-                    diff = sum(abs(v - mean_value) for v in values) / len(values)
-                    diversity += diff
+                    variance = sum((v - mean_value) ** 2 for v in values) / len(values)
+                    diversity += (variance ** 0.5)
             diversity /= len(self.modifiable_heaters)
             
             # Update best individual and check for improvement
             if current_best > best_fitness:
-                best_individual = population[fitness_scores.index(current_best)].copy()
-                
-                # Check if improvement is significant
+                best_individual = current_best_individual
                 if current_best > last_improvement_fitness + improvement_threshold:
                     last_improvement_fitness = current_best
                     generations_without_improvement = 0
                     best_fitness = current_best
+                    
+                    # Store current population if it's promising
+                    if len(alternative_populations) < 5:
+                        alternative_populations.append(population[:])
+                    else:
+                        alternative_populations[restart_count % 5] = population[:]
                 else:
                     generations_without_improvement += 1
             else:
                 generations_without_improvement += 1
             
-            # Calculate timing information
-            generation_time = time.time() - generation_start_time
-            total_time = (time.time() - total_start_time) / 60.0  # Convert to minutes
-            
             # Print status
+            generation_time = time.time() - generation_start_time
+            total_time = (time.time() - total_start_time) / 60.0
+            
             print(f"{generation:4d} {best_fitness:10.2f} {current_avg:10.2f} "
-                  f"{current_min:10.2f} {diversity:10.2f} {generations_without_improvement:8d} "
-                  f"{generation_time:10.2f} {total_time:10.2f}")
+                f"{current_min:10.2f} {diversity:10.2f} {generations_without_improvement:8d} "
+                f"{generation_time:10.2f} {total_time:10.2f}")
             
-            # Partial reset when no progress
+            # Initialize new population
+            new_population = []
+            
+            # Multi-level restart strategy
             if generations_without_improvement >= 15:
-                print("\nResetting 50% of the population for exploration!")
+                restart_count += 1
+                print(f"\nExecuting restart strategy {restart_count % 3 + 1}...")
                 
-                sorted_pop = [x for _, x in sorted(zip(fitness_scores, population), key=lambda pair: pair[0], reverse=True)]
-                elite_individuals = sorted_pop[:ELITE_SIZE]
+                if restart_count % 3 == 0:  # Strategy 1: Aggressive mutation
+                    new_population = []
+                    # Keep top solutions with aggressive mutation
+                    sorted_pop = [x for _, x in sorted(zip(fitness_scores, population), 
+                                                    key=lambda pair: pair[0], 
+                                                    reverse=True)]
+                    for ind in sorted_pop[:5]:
+                        mutated = ind.copy()
+                        for heater in self.modifiable_heaters:
+                            if heater not in self.fixed_first_layer and random.random() < 0.7:
+                                mutated[heater] = round(random.uniform(0.1, 4.9), 2)
+                        new_population.append(mutated)
+                    
+                elif restart_count % 3 == 1:  # Strategy 2: Population hybridization
+                    if alternative_populations:
+                        # Mix current population with a stored alternative population
+                        alt_pop = random.choice(alternative_populations)
+                        new_population = []
+                        for i in range(5):
+                            if i < len(alt_pop):
+                                new_population.append(alt_pop[i].copy())
+                    
+                else:  # Strategy 3: Complete restart with history influence
+                    new_population = []
+                    if hall_of_fame:
+                        # Use hall of fame solutions as seeds
+                        for i in range(min(5, len(hall_of_fame))):
+                            base = hall_of_fame[i][0].copy()
+                            # Apply medium mutation
+                            for heater in self.modifiable_heaters:
+                                if heater not in self.fixed_first_layer and random.random() < 0.4:
+                                    base[heater] = round(random.uniform(0.1, 4.9), 2)
+                            new_population.append(base)
                 
-                # Ensure the population size remains correct
-                num_new_individuals = POPULATION_SIZE - ELITE_SIZE
-                new_population = elite_individuals + [self.create_individual() for _ in range(num_new_individuals)]
+                # Fill remaining population with new random individuals
+                while len(new_population) < POPULATION_SIZE:
+                    new_ind = self.create_individual()
+                    new_population.append(new_ind)
                 
-                # Ensure population size remains consistent
-                assert len(new_population) == POPULATION_SIZE, f"Population size mismatch: {len(new_population)} vs {POPULATION_SIZE}"
+                # Reset improvement counter and adjust parameters
+                generations_without_improvement = 0
+                self.mutation_rate = 0.4
                 
-                population = new_population
-                generations_without_improvement = 0  # Reset counter
-
-            # Elitism - carry over best individuals
-            sorted_pop = [x for _, x in sorted(zip(fitness_scores, population), 
-                                                 key=lambda pair: pair[0], 
-                                             reverse=True)]
-            new_population = []  # Ensure variable is initialized
-            new_population.extend(sorted_pop[:ELITE_SIZE])
+            else:
+                # Regular evolution with improved diversity maintenance
+                sorted_pop = [x for _, x in sorted(zip(fitness_scores, population), 
+                                                key=lambda pair: pair[0], 
+                                                reverse=True)]
+                
+                # Adaptive elitism
+                elite_size = max(2, min(5, int(POPULATION_SIZE * (1 - diversity))))
+                new_population.extend(sorted_pop[:elite_size])
+                
+                # Generate rest of new population
+                while len(new_population) < POPULATION_SIZE:
+                    if random.random() < 0.9:  # Standard breeding
+                        parent1 = self.tournament_selection(population, fitness_scores)
+                        parent2 = self.tournament_selection(population, fitness_scores)
+                        child = self.crossover(parent1, parent2)
+                        child = self.mutate(child)
+                    else:  # Occasional fresh blood
+                        child = self.create_individual()
+                    new_population.append(child)
             
-            
-            # Ensure the population is large enough before selecting parents
-            while len(new_population) < POPULATION_SIZE:
-                if len(population) < 2:
-                    print("Warning: Not enough individuals for crossover. Adding random individuals.")
-                    new_population.append(self.create_individual())
-                    continue
-
-                parent1 = self.tournament_selection(population, fitness_scores)
-                parent2 = self.tournament_selection(population, fitness_scores)
-                
-                child = self.crossover(parent1, parent2)
-                child = self.mutate(child)
-                new_population.append(child)
-
-            
+            # Update population
             population = new_population
             
-            # Adjust mutation rate based on diversity
-            if generations_without_improvement > 10:  # If stuck
-                self.mutation_rate = 0.5  # Drastically increase mutations
-            elif diversity < 0.3:
-                self.mutation_rate = min(0.35, self.mutation_rate * 1.2)  # Increase exploration
+            # Adaptive parameter adjustment
+            if diversity < 0.3:
+                self.mutation_rate = min(0.5, self.mutation_rate * 1.2)
             elif diversity > 0.6:
-                self.mutation_rate = max(0.05, self.mutation_rate * 0.8)  # Reduce mutations
-
+                self.mutation_rate = max(0.1, self.mutation_rate * 0.8)
         
         total_time = (time.time() - total_start_time) / 60.0
         print("\nOptimization completed!")
@@ -406,7 +457,7 @@ class DecoderOptimizer:
         print("=" * 100)
         
         return best_individual, best_fitness
-
+        
     def cleanup(self):
         """Clean up resources"""
         self.serial.close()
@@ -417,7 +468,7 @@ def main():
     optimizer = DecoderOptimizer()
     try:
         print("Starting 3-bit decoder optimization using genetic algorithm...")
-        best_config, best_fitness = optimizer.optimize(generations=500)
+        best_config, best_fitness = optimizer.optimize(generations=200)
         
         print(f"\nOptimization complete! Final fitness: {best_fitness:.2f}")
         print("\nBest Heater Configuration:")
