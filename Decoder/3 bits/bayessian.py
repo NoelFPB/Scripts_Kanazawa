@@ -249,11 +249,11 @@ class BayesianDecoderOptimizer:
             model_type='GP',
             acquisition_type='EI',
             normalize_Y=True,
-            initial_design_numdata=20,
+            initial_design_numdata=30,  # Increase initial exploration
             exact_feval=False,
-            maximize=True
+            maximize=True,
+            acquisition_weight=2  # Increase exploration
         )
-        
         print("\nStarting Bayesian Optimization...")
         print("=" * 100)
         print(f"{'Iter':>4} {'Score':>10} {'Best':>10} {'Time (s)':>10}")
