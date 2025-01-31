@@ -21,7 +21,7 @@ INPUT_STATES = [
 ]
 
 # Genetic Algorithm Parameters
-POPULATION_SIZE = 20
+POPULATION_SIZE = 30
 ELITE_SIZE = 4
 MUTATION_RATE = 0.2
 CROSSOVER_RATE = 0.7
@@ -172,18 +172,29 @@ class DecoderOptimizer:
             
             # Score components
             if actual_highest == expected_highest:
-                # Base score for correct output
-                correct_bonus = 100
+                correct_bonus = 150  # Increased base score
                 
-                # Separation quality score
-                # We want ratio > 1.5 for good separation
-                separation_quality = max(0, (separation_ratio - 1) * 50)
+                # Enhanced separation quality scoring
+                if separation_ratio > 2.0:
+                    separation_quality = 100
+                elif separation_ratio > 1.5:
+                    separation_quality = 75
+                else:
+                    separation_quality = max(0, (separation_ratio - 1) * 60)
                 
-                # Penalize very low voltages on correct output
-                voltage_quality = min(1.0, outputs[expected_highest] / 1.0) * 20
+                # Better voltage quality scaling
+                if outputs[expected_highest] > 2.0:
+                    voltage_quality = 50
+                elif outputs[expected_highest] > 1.0:
+                    voltage_quality = 30
+                else:
+                    voltage_quality = max(0, outputs[expected_highest] * 25)
                 
-                # Add components
                 state_score = correct_bonus + separation_quality + voltage_quality
+                
+                # Extra bonus for very clear separation
+                if separation_ratio > 2.5:
+                    state_score += 25
             else:
                 # Penalty for incorrect output, but maintain some gradient
                 voltage_diff = outputs[expected_highest] - max_output
@@ -371,7 +382,7 @@ class DecoderOptimizer:
             new_population = []
             
             # Multi-level restart strategy
-            if generations_without_improvement >= 15:
+            if generations_without_improvement >= 10:
                 restart_count += 1
                 print(f"\nExecuting restart strategy {restart_count % 3 + 1}...")
                 
