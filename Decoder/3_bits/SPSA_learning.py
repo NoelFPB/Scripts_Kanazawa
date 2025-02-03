@@ -348,7 +348,7 @@ class SerialController:
 def main():
     oscilloscope = OscilloscopeController()
     config_manager = ConfigurationManager()
-    data_processor = DataProcessor('decoder_normalized.csv')
+    data_processor = DataProcessor('C:\\Users\\noelp\\Documents\\Kanazawa\\Scripts_Kanazawa\\Decoder\\3_bits\\Datasets\\decoder_normalized.csv')
     serial_controller = SerialController()
 
     # Setup connections
