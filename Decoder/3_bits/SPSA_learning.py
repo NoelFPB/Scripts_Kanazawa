@@ -144,7 +144,7 @@ class DataProcessor:
         """Create one-hot encoding for decoder outputs"""
         for output in self.df['Output']:
             # Create 8-element array with 1 at the correct output position
-            target = [0] * 8
+            target = [0] * 7
             output_num = int(output.replace('Out', ''))
             target[output_num] = 1
             self.target.append(target)
@@ -215,7 +215,7 @@ class SerialController:
     def test_configuration(self, config, data_processor, oscilloscope, config_manager):
         """Testing phase using the trained configuration"""
         print("\nStarting Testing with Trained Configuration...")
-        confusion_matrix = np.zeros((8, 8), dtype=int)  # 8x8 for decoder outputs
+        confusion_matrix = np.zeros((7, 7), dtype=int)  # 8x8 for decoder outputs
         
         # First apply the trained heater configuration
         self.send_heater_values(config)
@@ -242,8 +242,8 @@ class SerialController:
         
         print("\nConfusion Matrix:")
         print(" " * 10 + "Predicted →")
-        print("Actual ↓  " + "".join(f"Out{i:1d}    " for i in range(8)))
-        for i in range(8):
+        print("Actual ↓  " + "".join(f"Out{i:1d}    " for i in range(7)))
+        for i in range(7):
             print(f"Out{i:1d}      " + "".join(f"{n:5d} " for n in confusion_matrix[i]))
         
         accuracy = np.trace(confusion_matrix) / np.sum(confusion_matrix)
