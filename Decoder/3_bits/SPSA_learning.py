@@ -1,10 +1,13 @@
 import numpy as np
 import time
-import pyvisa as visa
+import pyvisa
 import serial
 import pandas as pd
 from sklearn.model_selection import train_test_split
 import random
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from queue import Queue
 
 class ConfigurationManager:
     """Manages configuration generation and perturbation"""
@@ -34,46 +37,91 @@ class ConfigurationManager:
                   config[h] + delta * delta_vector[h]))
             for h in config
         }
-
 class OscilloscopeController:
     def __init__(self):
-        self.channels = ['CHANnel1', 'CHANnel2', 'CHANnel3', 'CHANnel4',
-                        'CHANnel5', 'CHANnel6', 'CHANnel7', 'CHANnel8']  # 8 outputs for decoder
-        self.scope = None
-
-    def connect_oscilloscope(self):
+        self.scopes = None
+        self.SCOPE1_ID = 'USB0::0x1AB1::0x0610::HDO1B244000779::INSTR'
+        self.SCOPE2_ID = 'USB0::0x1AB1::0x0610::HDO1B244100809::INSTR'
+        
+    def init_scopes(self):
+        """Initialize both oscilloscopes"""
         try:
-            rm = visa.ResourceManager()
-            resources = rm.list_resources()
-            if not resources:
-                raise Exception("No VISA resources found")
-            self.scope = rm.open_resource(resources[0])
-            self.initialize_channels()
+            rm = pyvisa.ResourceManager()
+            scope1 = rm.open_resource(self.SCOPE1_ID)
+            scope2 = rm.open_resource(self.SCOPE2_ID)
+            self.scopes = [scope1, scope2]
+            
+            for scope in self.scopes:
+                scope.timeout = 5000
+                for i in range(1, 5):
+                    scope.write(f':CHANnel{i}:DISPlay ON')
+                    scope.write(f':CHANnel{i}:SCALe 2')
+                    scope.write(f':CHANnel{i}:OFFSet -6')
             return True
         except Exception as e:
-            print(f"Failed to connect to oscilloscope: {e}")
+            print(f"Failed to initialize scopes: {e}")
             return False
-
-    def initialize_channels(self):
-        if not self.scope:
-            return
-        for channel in self.channels:
-            self.scope.write(f':{channel}:DISPlay ON')
-            self.scope.write(f':{channel}:SCALe 2')
-            self.scope.write(f':{channel}:OFFSet -6')
-
-    def measure_outputs(self):
+            
+    def measure_scope(self, scope_idx, output_queue):
+        """Measure outputs from a single scope"""
         try:
+            scope = self.scopes[scope_idx]
             outputs = []
-            for channel in range(1, 9):  # 8 channels for decoder outputs
-                value = float(self.scope.query(
+            # First scope has 4 channels, second has 3
+            num_channels = 4 if scope_idx == 0 else 3
+            
+            for channel in range(1, num_channels + 1):
+                value = float(scope.query(
                     f':MEASure:STATistic:ITEM? CURRent,VMAX,CHANnel{channel}'))
                 outputs.append(round(value, 5))
-            return outputs
+            
+            output_queue.put((scope_idx, outputs))
+            
+        except Exception as e:
+            print(f"Error measuring scope {scope_idx}: {e}")
+            output_queue.put((scope_idx, [None] * (4 if scope_idx == 0 else 3)))
+
+    def measure_outputs(self):
+        """Measure outputs from both oscilloscopes in parallel"""
+        try:
+            output_queue = Queue()
+            threads = []
+            
+            # Start measurement threads for both scopes
+            for scope_idx in range(2):
+                thread = threading.Thread(
+                    target=self.measure_scope,
+                    args=(scope_idx, output_queue)
+                )
+                threads.append(thread)
+                thread.start()
+                
+            # Wait for both threads to complete
+            for thread in threads:
+                thread.join()
+                
+            # Collect results
+            all_outputs = []
+            scope_results = {}
+            
+            # Get results from queue
+            while not output_queue.empty():
+                scope_idx, outputs = output_queue.get()
+                scope_results[scope_idx] = outputs
+                
+            # Combine results in correct order
+            if 0 in scope_results and 1 in scope_results:
+                all_outputs.extend(scope_results[0])  # First scope (4 channels)
+                all_outputs.extend(scope_results[1])  # Second scope (3 channels)
+                return all_outputs
+            else:
+                print("Error: Missing results from one or both scopes")
+                return [None] * 7
+                
         except Exception as e:
             print(f"Measurement error: {e}")
-            return [None] * 8
-
+            return [None] * 7
+    
 class DataProcessor:
     def __init__(self, csv_path):
         self.csv_path = csv_path
