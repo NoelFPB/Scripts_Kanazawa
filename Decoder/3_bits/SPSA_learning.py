@@ -400,7 +400,7 @@ def main():
     serial_controller = SerialController()
 
     # Setup connections
-    if not oscilloscope.connect_oscilloscope():
+    if not oscilloscope.init_scopes():
         print("Failed to connect to oscilloscope")
         return
     
