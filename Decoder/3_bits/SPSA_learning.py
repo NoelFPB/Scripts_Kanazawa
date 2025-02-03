@@ -183,7 +183,7 @@ class SerialController:
         self.ser.flush()
         self.ser.reset_input_buffer()
         self.ser.reset_output_buffer()
-        time.sleep(0.01)
+ 
 
     def evaluate_config(self, config, validation_data, data_processor, 
                        config_manager, oscilloscope):
@@ -219,7 +219,7 @@ class SerialController:
         
         # First apply the trained heater configuration
         self.send_heater_values(config)
-        time.sleep(2)  # Let system stabilize with base configuration
+        time.sleep(0.2)  # Let system stabilize with base configuration
         
         for sample_id in data_processor.test_indices:
             decoder_data = data_processor.df.iloc[sample_id]
@@ -242,9 +242,9 @@ class SerialController:
         
         print("\nConfusion Matrix:")
         print(" " * 10 + "Predicted →")
-        print("Actual ↓  " + "".join(f"Out{i:1d}    " for i in range(7)))
+        print("Actual ↓  " + "".join(f"Out{i:1d}  " for i in range(7)))
         for i in range(7):
-            print(f"Out{i:1d}      " + "".join(f"{n:5d} " for n in confusion_matrix[i]))
+            print(f"Out{i:1d}     " + "".join(f"{n:5d} " for n in confusion_matrix[i]))
         
         accuracy = np.trace(confusion_matrix) / np.sum(confusion_matrix)
         print(f"\nOverall Accuracy: {accuracy:.2%}")
@@ -383,15 +383,16 @@ class SerialController:
         
         print("SPSA Training complete!")
         
-        # Fine-tuning phase
-        final_config = self.fine_tune(
-            initial_config=w,
-            config_manager=config_manager,
-            data_processor=data_processor,
-            oscilloscope=oscilloscope
-        )
+        # # Fine-tuning phase
+        # final_config = self.fine_tune(
+        #     initial_config=w,
+        #     config_manager=config_manager,
+        #     data_processor=data_processor,
+        #     oscilloscope=oscilloscope
+        # )
         
-        return final_config
+        # return final_config
+        return w
 
 def main():
     oscilloscope = OscilloscopeController()
@@ -418,7 +419,7 @@ def main():
         oscilloscope=oscilloscope,
         learning_rate=0.1,
         delta=0.5,
-        iterations=300
+        iterations= 200
     )
 
     clean_config = data_processor.format_config(best_config)
