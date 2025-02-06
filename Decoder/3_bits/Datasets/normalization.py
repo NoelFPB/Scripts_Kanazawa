@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 
-def normalize_decoder(input_file='decoder_data.csv', output_file='decoder_normalized.csv'):
+def normalize_decoder(input_file='improved_dataset.csv', output_file='improved_decoder_normalized.csv'):
     # Read the original dataset
     df = pd.read_csv(input_file)
     
