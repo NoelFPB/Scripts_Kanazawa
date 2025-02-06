@@ -330,13 +330,16 @@ class SerialController:
         return best_config
 
     def train(self, config_manager, data_processor, oscilloscope,
-             learning_rate=0.1, delta=0.5, iterations=300):
-        """Complete training process: SPSA followed by fine-tuning"""
-        # SPSA Training
+            learning_rate=0.1, delta=0.5, iterations=500, patience=100):
+        """SPSA training with adaptive stopping and learning rate decay"""
+        
         print("\nStarting SPSA Training...")
         w = config_manager.generate_random_config()
         train_data = list(data_processor.train_indices)
-        
+        best_config = w.copy()
+        best_loss = float('inf')
+        no_improvement_counter = 0
+
         for iteration in range(iterations):
             # Select a random training sample
             sample_id = random.choice(train_data)
@@ -377,22 +380,29 @@ class SerialController:
                 
                 # Clip values to valid range
                 w = {h: np.clip(value, config_manager.voltage_min, config_manager.voltage_max)
-                     for h, value in w.items()}
+                    for h, value in w.items()}
                 
                 print(f"Iteration {iteration}/{iterations}, Loss: {L_plus:.4f}")
-        
+
+                # Check for improvement
+                if L_plus < best_loss:
+                    best_loss = L_plus
+                    best_config = w.copy()
+                    no_improvement_counter = 0
+                else:
+                    no_improvement_counter += 1
+
+                # Stop early if no improvement
+                if no_improvement_counter >= patience:
+                    print(f"\nEarly stopping triggered after {iteration + 1} iterations")
+                    break
+
+            # **Reduce learning rate and delta over time** for better fine-tuning
+            learning_rate *= 0.99  # Decay learning rate
+            delta *= 0.99  # Reduce perturbation step
+
         print("SPSA Training complete!")
-        
-        # # Fine-tuning phase
-        # final_config = self.fine_tune(
-        #     initial_config=w,
-        #     config_manager=config_manager,
-        #     data_processor=data_processor,
-        #     oscilloscope=oscilloscope
-        # )
-        
-        # return final_config
-        return w
+        return best_config
 
 def main():
     oscilloscope = OscilloscopeController()
@@ -419,7 +429,7 @@ def main():
         oscilloscope=oscilloscope,
         learning_rate=0.1,
         delta=0.5,
-        iterations= 200
+        iterations= 1200
     )
 
     clean_config = data_processor.format_config(best_config)
