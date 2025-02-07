@@ -394,12 +394,13 @@ class SerialController:
 
                 # Stop early if no improvement
                 if no_improvement_counter >= patience:
-                    print(f"\nEarly stopping triggered after {iteration + 1} iterations")
-                    break
+                   print(f"\nEarly stopping triggered after {iteration + 1} iterations")
+                   break
 
             # **Reduce learning rate and delta over time** for better fine-tuning
             learning_rate *= 0.99  # Decay learning rate
             delta *= 0.99  # Reduce perturbation step
+            print(f"Learning Rate {learning_rate:3f} Delta {delta:3f}")
 
         print("SPSA Training complete!")
         return best_config
@@ -427,8 +428,8 @@ def main():
         config_manager=config_manager,
         data_processor=data_processor,
         oscilloscope=oscilloscope,
-        learning_rate=0.1,
-        delta=0.5,
+        learning_rate=0.5,
+        delta=0.1,
         iterations= 1200
     )
 

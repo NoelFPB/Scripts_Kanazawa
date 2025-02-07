@@ -55,7 +55,7 @@ for heater in fixed_first_layer:
     heater_values[heater] = 0.01
 
 # Voltage options - simplified set for faster convergence
-voltage_options = [0.1, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 4.9]
+voltage_options = [0.1, 1.0, 2.5, 4.9]
 
 def send_heater_values(ser, config):
     """Send heater values via serial connection"""
@@ -88,7 +88,6 @@ def evaluate_configuration(ser, config):
     total_score = 0
 
     print("\n" + "="*50)
-    #print("Current configuration evaluation:")
     
     # Expected highest output for each input combination (3-bit)
     expected_outputs = {
@@ -118,30 +117,30 @@ def evaluate_configuration(ser, config):
         outputs = measure_outputs()
         if None in outputs:
             return -1000, []
-       # Print current readings
-        #print("\n             Scope 1                 |    Scope 2")
-        print(f"Input {input_state}: ", end="")
-        # Print all readings on one line
-        for i in range(7):
-            if i == 4:
-                print(" | ", end="")
-            print(f"{outputs[i]:6.4f}V ", end="")
-        print()  # New line at the end
+            
+        # Print current readings with input state
+        print(f"\nInput state (A,B,C): {input_state}")
+        #print("Channel outputs:")
+        print("", "".join(f"{outputs[i]:6.4f}V" for i in range(7)))
+        #print("Scope 2:", " ".join(f"{outputs[i]:6.4f}V" for i in range(4, 7)))
         
         # Find highest output
         max_output = max(outputs)
         actual_highest = outputs.index(max_output)
         expected_highest = expected_outputs[input_state]
-    
         
-        # Score based on correct output being highest
+        # Print comparison between expected and actual
+        print(f"Expected highest: Channel {expected_highest + 1} Actual highest:   Channel {actual_highest + 1}")
+        
         if actual_highest == expected_highest:
-            # Additional points for separation
             other_outputs = outputs.copy()
             other_outputs.pop(actual_highest)
             separation = max_output - max(other_outputs)
-            total_score += 10 + min(separation * 5, 10)  # Up to 10 bonus points for separation
-        
+            score = 10 + min(separation * 5, 10)
+            print(f"✓ CORRECT - Score: {score:.2f} (Separation: {separation:.4f}V)")
+            total_score += score
+        else:
+            print(f"✗ INCORRECT - Expected Ch{expected_highest + 1} but got Ch{actual_highest + 1}")
     
     return total_score
 
@@ -232,7 +231,7 @@ def main():
     
     except Exception as e:
         print(f"Error: {e}")
-    
+
     finally:
         ser.close()
         scope1.close()
