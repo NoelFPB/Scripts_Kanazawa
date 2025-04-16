@@ -1,0 +1,37 @@
+\documentclass{article}
+\usepackage{booktabs}     % For better table rules
+\usepackage{caption}      % For table captions
+\usepackage{multirow}     % For multi-row cells
+\usepackage{adjustbox}    % For scaling wide tables
+\usepackage{graphicx}     % For including images
+\usepackage{array}        % For column alignment
+\usepackage{pdflscape}
+\usepackage{makecell} % Add this to the preamble for multi-line headers
+\begin{document}
+
+\begin{table}[ht]
+\centering
+\caption{Measured Output Voltages, Normalized Intensities, Graphs, and Extinction Ratios}
+\label{tab:combined_data}
+\begin{adjustbox}{max width=\textwidth}
+\begin{tabular}{cc|cc|cccc|cccc|c|>{\centering\arraybackslash}m{3.8cm}}
+\toprule
+\multicolumn{2}{c|}{\textbf{Binary Input}} & 
+\multicolumn{2}{c|}{\textbf{Input Voltage (V)}} & 
+\multicolumn{4}{c|}{\textbf{Output Intensity (V)}} & 
+\multicolumn{4}{c|}{\textbf{Normalized Intensity (dB)}} & 
+\multirow{2}{*}{\makecell{\textbf{Extinction} \\ \textbf{Ratio (dB)}}} & 
+\multirow{2}{*}{\textbf{Graph}} \\
+\cmidrule(lr){1-2} \cmidrule(lr){3-4} \cmidrule(lr){5-8} \cmidrule(lr){9-12}
+\textbf{A} & \textbf{B} & $V_a$ & $V_b$ & $0$ & $1$ & $O_3$ & $O_4$ & $O_1$ & $O_2$ & $O_3 $ & $O_4$ & & \\
+\midrule
+0 & 0 & 0.10 & 0.10 & 5.00 & 2.46 & 2.90 & 2.13 & 0.00 & -2.53 & -2.10 & -2.86 & 2.37 & \includegraphics[width=4cm]{result1.png} \\
+0 & 1 & 0.10 & 4.90 & 3.30 & 4.35 & 3.60 & 3.48 & -1.05 & 0.00 & -0.75 & -0.88 & 0.82 & \includegraphics[width=4cm]{result2.png} \\
+1 & 0 & 4.90 & 0.10 & 1.73 & 2.86 & 6.30 & 2.37 & -4.57 & -3.44 & 0.00 & -3.93 & 3.43 & \includegraphics[width=4cm]{result3.png} \\
+1 & 1 & 4.90 & 4.90 & 1.71 & 4.47 & 4.03 & 6.01 & -4.30 & -1.54 & -1.98 & 0.00 & 1.29 & \includegraphics[width=4cm]{result4.png} \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\end{table}
+
+\end{document}
