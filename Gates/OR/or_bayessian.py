@@ -2,9 +2,9 @@ import serial
 import time
 import pyvisa
 import numpy as np
-from sklearn.ensemble import RandomForestRegressor
-from scipy.optimize import differential_evolution
-import random
+from scipy.stats import norm
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import Matern, ConstantKernel, WhiteKernel
 from itertools import product
 
 # Serial port configuration 
@@ -12,46 +12,50 @@ SERIAL_PORT = 'COM4'
 BAUD_RATE = 115200
 
 # Heater configuration
-INPUT_HEATERS = [36, 37]  # Our OR gate inputs
+INPUT_HEATERS = [36, 37]  # Our AND gate inputs
 FIXED_FIRST_LAYER = list(range(33, 40))
 MODIFIABLE_HEATERS = [i for i in range(33) if i not in INPUT_HEATERS]
 
-# Input states for OR gate testing
+# Input states for AND gate testing
 INPUT_COMBINATIONS = [(0.1, 0.1), (0.1, 4.9), (4.9, 0.1), (4.9, 4.9)]
 
 # Voltage options for discretization
 VOLTAGE_OPTIONS = [0.0, 0.1, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 4.9]
 
-class ORGateOptimizer:
-    """
-    Optimize a physical OR gate using ensemble learning and evolutionary strategies.
-    This implementation uses a completely different approach from the AND gate.
-    """
+class ImprovedBayesianOptimizer:
     def __init__(self):
-        # Initialize hardware connections
+        # Initialize oscilloscope
         self.scope = self._init_scope()
+        # Initialize serial connection
         self.serial = serial.Serial(SERIAL_PORT, BAUD_RATE)
         time.sleep(1)
         
-        # Initialize Random Forest model for surrogate modeling
-        # Random Forest is more robust to noisy data than Gaussian Process
-        self.model = RandomForestRegressor(
-            n_estimators=50,
-            max_depth=5,
-            min_samples_split=3,
-            random_state=42
+        # Initialize Gaussian Process model with a more suitable kernel for this problem
+        # Using a smaller length_scale to allow for more complex patterns
+        # Setting length_scale_bounds to prevent convergence warnings
+        kernel = ConstantKernel(1.0) * Matern(
+            nu=1.5,  # Less smooth assumption
+            length_scale=0.5,  # Smaller length scale
+            length_scale_bounds=(1e-5, 10.0)  # Prevent hitting the lower bound
+        ) + WhiteKernel(noise_level=0.1, noise_level_bounds=(1e-10, 1e1))
+        
+        self.gp = GaussianProcessRegressor(
+            kernel=kernel, 
+            alpha=1e-2,  # Larger alpha to avoid numerical issues
+            normalize_y=True, 
+            n_restarts_optimizer=3  # Fewer restarts to speed up fitting
         )
         
-        # History of evaluated configurations
-        self.configs_evaluated = []
-        self.scores_evaluated = []
+        # Initialize observation history
+        self.X_observed = []
+        self.y_observed = []
         
-        # Best configuration found
+        # Track best configuration seen so far
         self.best_config = None
         self.best_score = float('-inf')
         
     def _init_scope(self):
-        """Initialize oscilloscope for OR gate output measurement"""
+        """Initialize the oscilloscope and set up channels"""
         rm = pyvisa.ResourceManager()
         resources = rm.list_resources()
         if not resources:
@@ -59,7 +63,7 @@ class ORGateOptimizer:
         scope = rm.open_resource(resources[0])
         scope.timeout = 5000
 
-        # Setup Channel 1 for OR gate output measurement
+        # Setup only Channel 1 for AND gate output measurement
         scope.write(':CHANnel1:DISPlay ON')
         scope.write(':CHANnel1:SCALe 2')
         scope.write(':CHANnel1:OFFSet -6')
@@ -71,16 +75,15 @@ class ORGateOptimizer:
         return scope
     
     def send_heater_values(self, config):
-        """Send heater voltage configuration to hardware"""
+        """Send heater values to the hardware"""
         voltage_message = "".join(f"{heater},{value};" for heater, value in config.items()) + '\n'
         self.serial.write(voltage_message.encode())
         self.serial.flush()
-        time.sleep(0.05)  # Small delay to ensure message is sent
         self.serial.reset_input_buffer()
         self.serial.reset_output_buffer()
     
     def measure_output(self):
-        """Measure the OR gate output voltage from oscilloscope"""
+        """Measure the OR gate output from oscilloscope"""
         try:
             value = float(self.scope.query(':MEASure:STATistic:ITEM? CURRent,VMAX,CHANnel1'))
             return round(value, 5)
@@ -88,38 +91,8 @@ class ORGateOptimizer:
             print(f"Measurement error: {e}")
             return None
     
-    def config_to_vector(self, config):
-        """Convert configuration dictionary to feature vector for model"""
-        return np.array([config.get(h, 0.0) for h in MODIFIABLE_HEATERS])
-    
-    def vector_to_config(self, vector):
-        """Convert feature vector to configuration dictionary"""
-        config = {h: vector[i] for i, h in enumerate(MODIFIABLE_HEATERS)}
-        
-        # Add fixed first layer values
-        for h in FIXED_FIRST_LAYER:
-            if h not in INPUT_HEATERS:
-                config[h] = 0.01
-                
-        return config
-    
     def evaluate_configuration(self, config):
-        """
-        Evaluate a configuration for OR gate behavior.
-        OR gate truth table:
-        0 OR 0 = 0 (LOW)
-        0 OR 1 = 1 (HIGH)
-        1 OR 0 = 1 (HIGH)
-        1 OR 1 = 1 (HIGH)
-        """
-        # Check if we've already evaluated this configuration
-        config_key = tuple(config.get(h, 0.0) for h in sorted(config.keys()))
-        for i, past_config in enumerate(self.configs_evaluated):
-            past_key = tuple(past_config.get(h, 0.0) for h in sorted(past_config.keys()))
-            if config_key == past_key:
-                return self.scores_evaluated[i], None
-        
-        # If not in history, evaluate on hardware
+        """Evaluate a configuration across all input combinations"""
         total_score = 0
         results = []
         
@@ -131,412 +104,294 @@ class ORGateOptimizer:
             
             # Send configuration to hardware
             self.send_heater_values(current_config)
-            time.sleep(0.2)  # Wait for the system to stabilize
+            time.sleep(0.25)  # Wait for the system to stabilize
             
             # Measure output
             output = self.measure_output()
             if output is None:
                 return -1000, []  # Return a large negative score on error
             
-            # OR Gate scoring function
+            # Enhanced scoring function for AND gate behavior
             if input_state == (0.1, 0.1):
-                # Both inputs LOW -> output should be LOW
-                if output < 1.2:
-                    # Stronger reward for cleaner LOW signal
-                    total_score += 40 + (20 * np.exp(-output))
-                elif output < 1.7:
-                    # Acceptable but not optimal
-                    total_score += 20 + (10 * (1.5 - output))
+                # Both inputs HIGH -> output should be HIGH
+                if output < 1:  # Higher threshold for clearer distinction
+                    # Quadratic reward for higher voltage - encourages stronger HIGH signal
+                    total_score += 30 + (output * output)
+                elif output < 1.5:
+                    # Linear reward for acceptable HIGH signal
+                    total_score += 20 + (output * 5)
                 else:
-                    # Severe penalty for incorrect behavior
-                    total_score -= 50 + (output * output)
+                    # Severe penalty for incorrect HIGH signal
+                    total_score -= 20
             else:
-                # Any other input combination -> output should be HIGH
-                if output > 4 and output < 7:
-                    # Stronger reward for cleaner HIGH signal
-                    total_score += 40 + (5 * output)
-                elif output > 3 and output < 7:
-                    # Acceptable but not optimal
-                    total_score += 20 + (5 * output)
+                # Any other input combination -> output should be LOW
+                if output > 3:  # Stricter threshold for LOW
+                    # Exponential reward for lower voltage
+                    total_score += 20 + (10 * np.exp(-output))
+                elif output < 2:
+                    # Linear reward for acceptable LOW signal
+                    total_score += 10 + (10 * (1.0 - output))
                 else:
-                    # Severe penalty for incorrect behavior
-                    total_score -= 50 + ((5.0 - output) * (5.0 - output))
-            
-            # Record results
-            results.append({
-                'inputs': input_state,
-                'output': output,
-                'expected': 'LOW' if input_state == (0.1, 0.1) else 'HIGH',
-                'actual': 'HIGH' if output > 2.0 else 'LOW'
-            })
+                    # Severe penalty for incorrect LOW signal - quadratic with output level
+                    total_score -= 30 + (output * output)
         
-        # Add to history
-        self.configs_evaluated.append(config.copy())
-        self.scores_evaluated.append(total_score)
-        
-        # Update best if improved
-        if total_score > self.best_score:
-            self.best_score = total_score
-            self.best_config = config.copy()
-            print(f"New best score: {total_score:.2f}")
-        
-        return total_score, results
+        return total_score
     
-    def initial_sampling(self, n_samples=10):
-        """Initial sampling phase using different strategies"""
-        print(f"Performing initial sampling with {n_samples} configurations...")
+    def config_to_vector(self, config):
+        """Convert a configuration dictionary to a feature vector"""
+        return np.array([[config[h] for h in MODIFIABLE_HEATERS]])
+    
+    def vector_to_config(self, vector):
+        """Convert a feature vector to a configuration dictionary"""
+        config = {h: vector[0][i] for i, h in enumerate(MODIFIABLE_HEATERS)}
         
-        # Zero configuration (baseline)
-        zero_config = {h: 0.0 for h in MODIFIABLE_HEATERS}
+        # Add fixed first layer values
         for h in FIXED_FIRST_LAYER:
             if h not in INPUT_HEATERS:
-                zero_config[h] = 0.01
-        
-        score, _ = self.evaluate_configuration(zero_config)
-        print(f"Zero configuration: Score = {score:.2f}")
-        
-        # Random sampling
-        for i in range(n_samples - 1):
-            # Generate configuration with structured patterns
-            if i % 3 == 0:
-                # Alternating pattern
-                config = {h: VOLTAGE_OPTIONS[h % len(VOLTAGE_OPTIONS)] for h in MODIFIABLE_HEATERS}
-            elif i % 3 == 1:
-                # Gradient pattern
-                config = {h: VOLTAGE_OPTIONS[min(h // 3, len(VOLTAGE_OPTIONS)-1)] for h in MODIFIABLE_HEATERS}
-            else:
-                # Random pattern
-                config = {h: random.choice(VOLTAGE_OPTIONS) for h in MODIFIABLE_HEATERS}
-            
-            # Add fixed first layer values
-            for h in FIXED_FIRST_LAYER:
-                if h not in INPUT_HEATERS:
-                    config[h] = 0.01
-            
-            score, _ = self.evaluate_configuration(config)
-            print(f"Initial configuration {i+1}/{n_samples-1}: Score = {score:.2f}")
-    
-    def train_surrogate_model(self):
-        """Train surrogate model on collected data"""
-        if len(self.configs_evaluated) < 5:
-            print("Not enough data to train surrogate model yet.")
-            return False
-        
-        X = np.array([self.config_to_vector(c) for c in self.configs_evaluated])
-        y = np.array(self.scores_evaluated)
-        
-        # Train the random forest model
-        self.model.fit(X, y)
-        
-        # Validate model
-        predictions = self.model.predict(X)
-        r2 = np.corrcoef(predictions, y)[0, 1] ** 2
-        print(f"Surrogate model trained. R² = {r2:.4f}")
-        
-        return True
-    
-    def predict_score(self, config):
-        """Predict score for a configuration using surrogate model"""
-        X = self.config_to_vector(config).reshape(1, -1)
-        return self.model.predict(X)[0]
-    
-    def evolution_step(self, population_size=10, generations=3):
-        """Run mini evolutionary algorithm guided by surrogate model"""
-        print("\nRunning evolutionary optimization step...")
-        
-        # Create initial population from best configurations and random ones
-        population = []
-        
-        # Add best config so far
-        if self.best_config:
-            population.append(self.best_config.copy())
-        
-        # Add top configurations from history
-        if len(self.configs_evaluated) > 1:
-            sorted_indices = np.argsort(self.scores_evaluated)[::-1]
-            for idx in sorted_indices[:min(3, len(sorted_indices))]:
-                if len(population) < population_size // 2:
-                    population.append(self.configs_evaluated[idx].copy())
-        
-        # Fill rest with random configurations
-        while len(population) < population_size:
-            config = {h: random.choice(VOLTAGE_OPTIONS) for h in MODIFIABLE_HEATERS}
-            for h in FIXED_FIRST_LAYER:
-                if h not in INPUT_HEATERS:
-                    config[h] = 0.01
-            population.append(config)
-        
-        # Evolutionary loop
-        for generation in range(generations):
-            print(f"Generation {generation+1}/{generations}")
-            
-            # Evaluate all members
-            scores = []
-            for i, config in enumerate(population):
-                # Use surrogate model if available, otherwise evaluate on hardware
-                if hasattr(self, 'model') and self.model is not None:
-                    score = self.predict_score(config)
-                    scores.append(score)
-                else:
-                    score, _ = self.evaluate_configuration(config)
-                    scores.append(score)
-            
-            # Select parents - tournament selection
-            parents = []
-            for _ in range(population_size):
-                # Select 3 random individuals
-                candidates = random.sample(range(population_size), 3)
-                # Choose the best one
-                winner = max(candidates, key=lambda idx: scores[idx])
-                parents.append(population[winner])
-            
-            # Create new population
-            new_population = []
-            
-            # Elitism - keep best individual
-            best_idx = np.argmax(scores)
-            new_population.append(population[best_idx].copy())
-            
-            # Fill rest with offspring
-            while len(new_population) < population_size:
-                # Select two parents
-                parent1, parent2 = random.sample(parents, 2)
+                config[h] = 0.01
                 
-                # Crossover
-                child = {}
-                for h in MODIFIABLE_HEATERS:
-                    # 70% chance to inherit from better parent, 30% from random parent
-                    if random.random() < 0.7:
-                        score1 = self.predict_score({h: parent1[h]}) if hasattr(self, 'model') else 0
-                        score2 = self.predict_score({h: parent2[h]}) if hasattr(self, 'model') else 0
-                        child[h] = parent1[h] if score1 > score2 else parent2[h]
-                    else:
-                        child[h] = random.choice([parent1[h], parent2[h]])
-                
-                # Mutation
-                for h in MODIFIABLE_HEATERS:
-                    if random.random() < 0.2:  # 20% mutation rate
-                        current = child[h]
-                        # Prefer nearby values in the discrete space
-                        current_idx = VOLTAGE_OPTIONS.index(current) if current in VOLTAGE_OPTIONS else 0
-                        max_step = min(2, len(VOLTAGE_OPTIONS) - 1)  # Maximum step size in voltage options
-                        step = random.randint(-max_step, max_step)
-                        new_idx = max(0, min(len(VOLTAGE_OPTIONS) - 1, current_idx + step))
-                        child[h] = VOLTAGE_OPTIONS[new_idx]
-                
-                # Add fixed layer values
-                for h in FIXED_FIRST_LAYER:
-                    if h not in INPUT_HEATERS:
-                        child[h] = 0.01
-                
-                new_population.append(child)
-            
-            # Replace population
-            population = new_population
-        
-        # Evaluate most promising configurations on actual hardware
-        final_candidates = []
-        
-        # Predict scores for all final population members
-        if hasattr(self, 'model') and self.model is not None:
-            predicted_scores = [self.predict_score(config) for config in population]
-            sorted_indices = np.argsort(predicted_scores)[::-1]
-            
-            # Take top 3 candidates
-            for idx in sorted_indices[:3]:
-                final_candidates.append(population[idx])
-        else:
-            final_candidates = population[:3]
-        
-        # Evaluate candidates on hardware
-        for candidate in final_candidates:
-            self.evaluate_configuration(candidate)
+        return config
     
-    def adaptive_grid_search(self, n_iterations=5):
-        """Perform adaptive grid search over promising dimensions"""
-        print("\nPerforming adaptive grid search...")
+    def expected_improvement(self, X, xi=0.1):  # Increased xi for more exploration
+        """Calculate expected improvement acquisition function with exploration bonus"""
+        # Get mean and standard deviation from GP model
+        mu, sigma = self.gp.predict(X, return_std=True)
         
-        if not self.best_config:
-            print("No best configuration available yet.")
-            return
+        # Get current best
+        if not self.y_observed:
+            return np.zeros(X.shape[0])
         
-        base_config = self.best_config.copy()
+        mu_sample = max(self.y_observed)
         
-        # Determine most important features if model is available
-        important_features = None
-        if hasattr(self, 'model') and self.model is not None:
-            importances = self.model.feature_importances_
-            # Get indices of top 5 most important features
-            important_indices = np.argsort(importances)[::-1][:5]
-            important_features = [MODIFIABLE_HEATERS[i] for i in important_indices]
-            print(f"Most important heaters: {important_features}")
-        else:
-            # If no model, choose 5 random heaters
-            important_features = random.sample(MODIFIABLE_HEATERS, 5)
+        # Calculate improvement
+        with np.errstate(divide='warn'):
+            imp = mu - mu_sample - xi
+            Z = imp / sigma
+            ei = imp * norm.cdf(Z) + sigma * norm.pdf(Z)
+            ei[sigma == 0.0] = 0.0
+            
+        return ei
+    
+    def upper_confidence_bound(self, X, beta=2.0):
+        """Upper Confidence Bound acquisition function (alternative to EI)"""
+        mu, sigma = self.gp.predict(X, return_std=True)
+        return mu + beta * sigma
+    
+    def generate_latin_hypercube_samples(self, n_samples):
+        """Generate Latin Hypercube samples for better initial exploration"""
+        # For each dimension, divide the range into n_samples equal bins
+        n_dims = len(MODIFIABLE_HEATERS)
         
-        # Grid search over important features
+        # Generate samples
+        result = np.zeros((n_samples, n_dims))
+        for i in range(n_dims):
+            # Generate a permutation of segment indices
+            perm = np.random.permutation(n_samples)
+            
+            # For each sample, pick a random point within its assigned segment
+            for j in range(n_samples):
+                # Map to voltage option index (discretized Latin hypercube)
+                bin_idx = int(perm[j] * len(VOLTAGE_OPTIONS) / n_samples)
+                result[j, i] = VOLTAGE_OPTIONS[bin_idx]
+                
+        return result
+    
+    def generate_all_nearby_configurations(self, config, distance=1):
+        """Generate all configurations that differ from the current one by at most 'distance' heaters"""
+        result = []
+        
+        # Get baseline vector
+        base_vector = self.config_to_vector(config)[0]
+        
+        # For efficiency, only try changing a subset of heaters at a time
+        # (changing all 33 heaters would generate too many combinations)
+        for heater_indices in self._get_heater_subsets(distance):
+            # Try all voltage combinations for these heaters
+            current_values = [base_vector[i] for i in heater_indices]
+            for voltage_combo in product(VOLTAGE_OPTIONS, repeat=len(heater_indices)):
+                if voltage_combo == tuple(current_values):
+                    continue  # Skip the current configuration
+                
+                # Create new vector
+                new_vector = base_vector.copy()
+                for i, idx in enumerate(heater_indices):
+                    new_vector[idx] = voltage_combo[i]
+                
+                result.append(new_vector.reshape(1, -1))
+        
+        if not result:  # Ensure we have at least some candidates
+            return np.array([base_vector.reshape(1, -1)])
+        
+        return np.vstack(result)
+    
+    def _get_heater_subsets(self, max_size):
+        """Get subsets of heater indices to modify"""
+        import itertools
+        
+        # For efficiency, divide heaters into groups
+        n_heaters = len(MODIFIABLE_HEATERS)
+        group_size = 5  # Adjust as needed - smaller value = more focused search
+        
+        groups = [range(i, min(i + group_size, n_heaters)) for i in range(0, n_heaters, group_size)]
+        
+        # Generate combinations of 1, 2, ..., max_size heaters from each group
+        result = []
+        for group in groups:
+            for size in range(1, min(max_size + 1, len(group) + 1)):
+                result.extend(itertools.combinations(group, size))
+        
+        return result
+    
+    def sample_next_point(self, acquisition_func='ei'):
+        """Sample the next point to evaluate based on acquisition function"""
+        if len(self.X_observed) < 5:
+            # Not enough data to fit a GP yet, return a Latin Hypercube sample
+            samples = self.generate_latin_hypercube_samples(1)
+            return samples[0].reshape(1, -1)
+        
+        # Generate candidates close to our current best configuration
+        candidates = self.generate_all_nearby_configurations(self.best_config, distance=2)
+        
+        # Also include some random samples for exploration
+        n_random = 200
+        random_samples = np.random.choice(VOLTAGE_OPTIONS, size=(n_random, len(MODIFIABLE_HEATERS)))
+        all_candidates = np.vstack([candidates, random_samples])
+        
+        # Calculate acquisition function values
+        if acquisition_func == 'ei':
+            acq_values = self.expected_improvement(all_candidates)
+        else:  # UCB
+            acq_values = self.upper_confidence_bound(all_candidates)
+        
+        # Return the point with highest acquisition value
+        best_idx = np.argmax(acq_values)
+        return all_candidates[best_idx].reshape(1, -1)
+    
+    def optimize(self, n_iterations=25, n_init=10, acquisition_func='ei'):
+        """Run Bayesian optimization for AND gate configuration"""
+        print("Starting Bayesian optimization for AND gate...")
+        
+        # Initial exploration phase
+        print(f"Performing initial exploration with {n_init} configurations...")
+        init_samples = self.generate_latin_hypercube_samples(n_init)
+        
+        for i, sample in enumerate(init_samples):
+            # Convert to config dictionary
+            config = self.vector_to_config(sample.reshape(1, -1))
+            
+            # Evaluate configuration
+            score = self.evaluate_configuration(config)
+            print(f"Initial configuration {i+1}/{n_init}: Score = {score}")
+            
+            # Track best configuration
+            if score > self.best_score:
+                self.best_score = score
+                self.best_config = config.copy()
+                print(f"New best score: {self.best_score}")
+            
+            # Store observation
+            self.X_observed.append(self.config_to_vector(config))
+            self.y_observed.append(score)
+        
+        # Convert observations to numpy arrays and fit GP model
+        X_np = np.vstack(self.X_observed)
+        y_np = np.array(self.y_observed)
+        self.gp.fit(X_np, y_np) # we are making a matrix here
+        
+        # Main optimization loop - adaptive acquisition function
+        print("\nStarting main optimization phase...")
         for iteration in range(n_iterations):
-            print(f"Grid search iteration {iteration+1}/{n_iterations}")
+            # Alternate between acquisition functions for better exploration/exploitation balance
+            current_acq_func = 'ucb' if iteration % 3 == 0 else 'ei'
             
-            if iteration > 0:
-                # Update important features based on recent improvements
-                if hasattr(self, 'model') and self.model is not None:
-                    self.train_surrogate_model()
-                    importances = self.model.feature_importances_
-                    important_indices = np.argsort(importances)[::-1][:5]
-                    important_features = [MODIFIABLE_HEATERS[i] for i in important_indices]
-                    print(f"Updated important heaters: {important_features}")
+            # Get next point to evaluate
+            next_point = self.sample_next_point(acquisition_func=current_acq_func)
             
-            # For each important feature, try different values
-            for feature in important_features:
-                current_value = base_config[feature]
-                best_value = current_value
-                best_score = float('-inf')
+            # Convert to config dictionary
+            next_config = self.vector_to_config(next_point)
+            
+            # Evaluate configuration
+            score = self.evaluate_configuration(next_config)
+            print(f"Iteration {iteration+1}/{n_iterations}: Score = {score} (using {current_acq_func})")
+            
+            # Track best configuration
+            if score > self.best_score:
+                self.best_score = score
+                self.best_config = next_config.copy()
+                print(f"New best score: {self.best_score}")
                 
-                # Try different values
-                for value in [v for v in VOLTAGE_OPTIONS if v != current_value]:
-                    test_config = base_config.copy()
-                    test_config[feature] = value
+                # Local optimization around best configuration
+                if score > self.best_score * 0.9:  # If we find a promising config
+                    print("Performing local optimization around current best...")
+                    local_best = self.local_search(next_config)
+                    if local_best[0] > self.best_score:
+                        self.best_score = local_best[0]
+                        self.best_config = local_best[1].copy()
+                        print(f"Local search improved score to: {self.best_score}")
+            
+            # Store observation
+            self.X_observed.append(self.config_to_vector(next_config))
+            self.y_observed.append(score)
+            
+            # Update GP model
+            X_np = np.vstack(self.X_observed)
+            y_np = np.array(self.y_observed)
+            self.gp.fit(X_np, y_np)
+        
+        return self.best_config, self.best_score
+    
+    def local_search(self, config, iterations=5):
+        """Perform a quick local search around a promising configuration"""
+        best_config = config.copy()
+        best_score = float('-inf')
+        
+        # Evaluate starting configuration
+        score = self.evaluate_configuration(config)
+        if score > best_score:
+            best_score = score
+            best_config = config.copy()
+        
+        # Try changing one heater at a time
+        for _ in range(iterations):
+            improved = False
+            
+            # Shuffle heaters to avoid bias
+            heaters = list(MODIFIABLE_HEATERS)
+            np.random.shuffle(heaters)
+            
+            for heater in heaters:
+                current_value = best_config[heater]
+                
+                # Try neighbor voltage values
+                neighbor_values = [v for v in VOLTAGE_OPTIONS if abs(VOLTAGE_OPTIONS.index(v) - VOLTAGE_OPTIONS.index(current_value)) <= 2]
+                
+                for new_value in neighbor_values:
+                    if new_value == current_value:
+                        continue
+                        
+                    test_config = best_config.copy()
+                    test_config[heater] = new_value
                     
-                    score, _ = self.evaluate_configuration(test_config)
+                    score = self.evaluate_configuration(test_config)
                     
                     if score > best_score:
                         best_score = score
-                        best_value = value
-                
-                # Update base config with best value
-                base_config[feature] = best_value
-        
-    def differential_evolution_step(self):
-        """Run differential evolution on promising regions"""
-        print("\nRunning differential evolution optimization...")
-        
-        if len(self.configs_evaluated) < 10:
-            print("Not enough data for differential evolution yet.")
-            return
-        
-        # Train surrogate model
-        self.train_surrogate_model()
-        
-        # Define bounds for optimization
-        bounds = [(0, len(VOLTAGE_OPTIONS)-1) for _ in range(len(MODIFIABLE_HEATERS))]
-        
-        # Objective function for differential evolution
-        def objective(indices):
-            # Convert indices to voltages
-            voltages = [VOLTAGE_OPTIONS[int(round(idx))] for idx in indices]
-            config = self.vector_to_config(voltages)
-            
-            # Use surrogate model for faster evaluation
-            return -self.predict_score(config)  # Negative because we're minimizing
-        
-        # Run differential evolution
-        result = differential_evolution(
-            objective,
-            bounds,
-            popsize=8,
-            maxiter=10,
-            mutation=(0.5, 1.0),
-            recombination=0.7,
-            strategy='best1bin',
-            disp=True
-        )
-        
-        # Convert result to configuration
-        indices = [int(round(idx)) for idx in result.x]
-        voltages = [VOLTAGE_OPTIONS[idx] for idx in indices]
-        best_config = self.vector_to_config(voltages)
-        
-        # Evaluate on actual hardware
-        print("Evaluating DE result on hardware...")
-        self.evaluate_configuration(best_config)
-    
-    def local_search(self, iterations=10):
-        """Perform local search around best configuration"""
-        print("\nPerforming local search around best configuration...")
-        
-        if not self.best_config:
-            print("No best configuration available yet.")
-            return
-        
-        current_config = self.best_config.copy()
-        current_score, _ = self.evaluate_configuration(current_config)
-        
-        for iteration in range(iterations):
-            print(f"Local search iteration {iteration+1}/{iterations}")
-            improved = False
-            
-            # Randomly select heaters to optimize
-            heaters = random.sample(MODIFIABLE_HEATERS, min(5, len(MODIFIABLE_HEATERS)))
-            
-            for heater in heaters:
-                current_value = current_config[heater]
-                
-                # Try nearby voltage values
-                current_idx = VOLTAGE_OPTIONS.index(current_value)
-                neighbor_indices = [
-                    max(0, current_idx - 1),
-                    min(len(VOLTAGE_OPTIONS) - 1, current_idx + 1)
-                ]
-                
-                for idx in neighbor_indices:
-                    if idx == current_idx:
-                        continue
-                    
-                    test_config = current_config.copy()
-                    test_config[heater] = VOLTAGE_OPTIONS[idx]
-                    
-                    score, _ = self.evaluate_configuration(test_config)
-                    
-                    if score > current_score:
-                        current_score = score
-                        current_config = test_config.copy()
+                        best_config = test_config.copy()
                         improved = True
-                        print(f"  Improved score to: {current_score:.2f}")
+                        print(f"  Local improvement: Heater {heater} = {new_value}V, Score = {best_score}")
                         break
                 
                 if improved:
                     break
             
             if not improved:
-                print("  No further improvements found")
                 break
         
-        return current_config, current_score
-    
-    def optimize(self):
-        """Run multi-stage optimization for OR gate"""
-        print("Starting OR gate optimization...")
-        
-        # Phase 1: Initial exploration
-        self.initial_sampling(n_samples=10)
-        
-        # Phase 2: Train initial surrogate model
-        self.train_surrogate_model()
-        
-        # Phase 3: Evolutionary optimization
-        self.evolution_step(population_size=8, generations=3)
-        
-        # Phase 4: Retrain surrogate model
-        self.train_surrogate_model()
-        
-        # Phase 5: Adaptive grid search
-        self.adaptive_grid_search(n_iterations=3)
-        
-        # Phase 6: Differential evolution
-        self.differential_evolution_step()
-        
-        # Phase 7: Final local search
-        final_config, final_score = self.local_search(iterations=10)
-        
-        print("\nOptimization complete!")
-        print(f"Best score: {final_score:.2f}")
-        
-        return final_config, final_score
+        return best_score, best_config
     
     def test_final_configuration(self, config):
         """Test and print performance of the optimized configuration"""
-        print("\nTesting final OR gate configuration:")
+        print("\nTesting final AND gate configuration:")
         all_correct = True
         
         for input_state in INPUT_COMBINATIONS:
@@ -548,17 +403,17 @@ class ORGateOptimizer:
             time.sleep(0.25)
             output_value = self.measure_output()
             
-            is_high = output_value > 2.0
-            expected_high = input_state != (0.1, 0.1)  # Only (Low,Low) should be LOW
-            is_correct = is_high == expected_high
+            is_low = output_value < 2.0
+            expected_low = input_state == (0.1, 0.1)
+            is_correct = is_low == expected_low
             
             if not is_correct:
                 all_correct = False
             
             print(f"\nInputs (A, B): {input_state}")
             print(f"OR Output: {output_value:.4f}V")
-            print(f"Output is: {'HIGH' if is_high else 'LOW'}")
-            print(f"Expected: {'HIGH' if expected_high else 'LOW'}")
+            print(f"Output is: {'LOW' if is_low else 'HIGH'}")
+            print(f"Expected: {'LOW' if expected_low else 'HIGH'}")
             print(f"Correct: {'Yes' if is_correct else 'No'}")
         
         if all_correct:
@@ -576,11 +431,18 @@ class ORGateOptimizer:
 
 
 def main():
-    optimizer = ORGateOptimizer()
+    optimizer = ImprovedBayesianOptimizer()
     
     try:
-        # Run optimization
-        best_config, best_score = optimizer.optimize()
+        # Run Bayesian optimization
+        best_config, best_score = optimizer.optimize(
+            n_iterations=25,  # More iterations
+            n_init=10,        # More initial points
+            acquisition_func='ei'
+        )
+        
+        print("\nOptimization complete!")
+        print(f"Best score: {best_score}")
         
         # Print final heater configuration
         print("\nFinal Heater Configuration:")

@@ -134,16 +134,8 @@ class ImprovedBayesianOptimizer:
                 else:
                     # Severe penalty for incorrect LOW signal - quadratic with output level
                     total_score -= 20 + (output * output)
-            
-            # Record result
-            results.append({
-                'inputs': input_state,
-                'output': output,
-                'expected': 'HIGH' if input_state == (4.9, 4.9) else 'LOW',
-                'actual': 'HIGH' if output > 2.0 else 'LOW'
-            })
         
-        return total_score, results
+        return total_score
     
     def config_to_vector(self, config):
         """Convert a configuration dictionary to a feature vector"""
@@ -288,7 +280,7 @@ class ImprovedBayesianOptimizer:
             config = self.vector_to_config(sample.reshape(1, -1))
             
             # Evaluate configuration
-            score, results = self.evaluate_configuration(config)
+            score = self.evaluate_configuration(config)
             print(f"Initial configuration {i+1}/{n_init}: Score = {score}")
             
             # Track best configuration
@@ -304,7 +296,7 @@ class ImprovedBayesianOptimizer:
         # Convert observations to numpy arrays and fit GP model
         X_np = np.vstack(self.X_observed)
         y_np = np.array(self.y_observed)
-        self.gp.fit(X_np, y_np)
+        self.gp.fit(X_np, y_np) # we are making a matrix here
         
         # Main optimization loop - adaptive acquisition function
         print("\nStarting main optimization phase...")
@@ -319,7 +311,7 @@ class ImprovedBayesianOptimizer:
             next_config = self.vector_to_config(next_point)
             
             # Evaluate configuration
-            score, results = self.evaluate_configuration(next_config)
+            score = self.evaluate_configuration(next_config)
             print(f"Iteration {iteration+1}/{n_iterations}: Score = {score} (using {current_acq_func})")
             
             # Track best configuration
@@ -354,7 +346,7 @@ class ImprovedBayesianOptimizer:
         best_score = float('-inf')
         
         # Evaluate starting configuration
-        score, _ = self.evaluate_configuration(config)
+        score = self.evaluate_configuration(config)
         if score > best_score:
             best_score = score
             best_config = config.copy()
@@ -380,7 +372,7 @@ class ImprovedBayesianOptimizer:
                     test_config = best_config.copy()
                     test_config[heater] = new_value
                     
-                    score, _ = self.evaluate_configuration(test_config)
+                    score = self.evaluate_configuration(test_config)
                     
                     if score > best_score:
                         best_score = score
