@@ -35,8 +35,8 @@ LOW_VOLTAGE = 0.1    # Voltage representing logical LOW
 HIGH_VOLTAGE = 4.9   # Voltage representing logical HIGH
 
 # Output voltage thresholds
-LOW_THRESHOLD = 1.5  # Outputs below this are considered LOW
-OPTIMAL_LOW = 1
+LOW_THRESHOLD = 2  # Outputs below this are considered LOW
+OPTIMAL_LOW = 1.5
 
 HIGH_THRESHOLD = 4 # Outputs above this start to be considered HIGH
 OPTIMAL_HIGH = 4.5   # Optimal HIGH output
@@ -53,7 +53,7 @@ INPUT_COMBINATIONS = [(LOW_VOLTAGE, LOW_VOLTAGE),
                      (HIGH_VOLTAGE, HIGH_VOLTAGE)]
 
 # Voltage options for discretization
-def create_voltage_options(start=0, end=4.9, step=0.1):
+def create_voltage_options(start=0, end=4.9, step=0.2):
     options = []
     current = start
     options.append(0.1)
@@ -275,8 +275,10 @@ class LogicGateOptimizer:
     
     
     def initial_sampling(self, n_samples=10):
-        """Initial sampling phase using different strategies to ensure uniqueness"""
-        print(f"Performing initial sampling with {n_samples} configurations...")
+        """Initial sampling using Latin Hypercube Sampling (LHS) for better space coverage"""
+        from scipy.stats import qmc  # More standard library for experimental design
+        
+        print(f"Performing Latin Hypercube initial sampling with {n_samples} configurations...")
         
         # Zero configuration (baseline)
         zero_config = {h: 0.1 for h in MODIFIABLE_HEATERS}
@@ -287,133 +289,67 @@ class LogicGateOptimizer:
         score, _ = self.evaluate_configuration(zero_config)
         print(f"Zero configuration: Score = {score:.2f}")
         
-        # Keep track of configs we've already tried to avoid duplication
+        # Track configs we've evaluated
         tried_configs = set()
         tried_configs.add(tuple(sorted(zero_config.items())))
         
-        # Random sampling
-        num_random_configs = n_samples - 1  # Subtract 1 for the zero config
-        for config_idx in range(num_random_configs):
-            unique_config_found = False
-            attempts = 0
+        # Number of dimensions = number of modifiable heaters
+        n_dim = len(MODIFIABLE_HEATERS)
+        
+        # Generate Latin Hypercube samples for better coverage of the search space
+        sampler = qmc.LatinHypercube(d=n_dim, seed=42)
+        samples = sampler.random(n=n_samples-1)  # -1 because we already did the zero config
+        
+        # Convert uniform samples [0,1] to voltage range
+        voltage_min = min(VOLTAGE_OPTIONS)
+        voltage_max = max(VOLTAGE_OPTIONS)
+        
+        # Function to find closest allowed voltage
+        def closest_voltage(v):
+            return min(VOLTAGE_OPTIONS, key=lambda x: abs(x - v))
+        
+        # Evaluate each sample
+        for i, sample in enumerate(samples):
+            # Convert unit hypercube to voltage range
+            voltages = voltage_min + sample * (voltage_max - voltage_min)
             
-            while not unique_config_found and attempts < 10:
-                attempts += 1
-                
-                # Generate a new config using a combination of strategies
-                config = {}
-                
-                # Randomly select a pattern generation strategy for this iteration
-                strategy = random.randint(0, 5)
-                
-                if strategy == 0:
-                    # Random values with some correlation between adjacent heaters
-                    prev_value = random.choice(VOLTAGE_OPTIONS)
-                    for h in sorted(MODIFIABLE_HEATERS):
-                        # 70% chance to stay close to previous value
-                        if random.random() < 0.7 and prev_value in VOLTAGE_OPTIONS:
-                            idx = VOLTAGE_OPTIONS.index(prev_value)
-                            # Move slightly up or down in voltage
-                            new_idx = max(0, min(len(VOLTAGE_OPTIONS)-1, 
-                                            idx + random.randint(-2, 2)))
-                            config[h] = VOLTAGE_OPTIONS[new_idx]
-                        else:
-                            config[h] = random.choice(VOLTAGE_OPTIONS)
-                        prev_value = config[h]
-                        
-                elif strategy == 1:
-                    # Spatial pattern based on heater position
-                    for h in MODIFIABLE_HEATERS:
-                        # Assume heaters are arranged in some spatial pattern
-                        # and assign voltages based on position
-                        position_factor = (h % 8) / 8.0  # Example spatial mapping
-                        voltage_idx = int(position_factor * (len(VOLTAGE_OPTIONS) - 1))
-                        config[h] = VOLTAGE_OPTIONS[voltage_idx]
-                        
-                        # Add some noise to make it unique
-                        if random.random() < 0.3:
-                            config[h] = random.choice(VOLTAGE_OPTIONS)
-                            
-                elif strategy == 2:
-                    # Cluster-based pattern with random cluster assignments
-                    num_clusters = random.randint(3, 6)
-                    cluster_assignments = [random.randint(0, num_clusters-1) 
-                                        for _ in range(len(MODIFIABLE_HEATERS))]
-                    cluster_voltages = [random.choice(VOLTAGE_OPTIONS) 
-                                    for _ in range(num_clusters)]
-                    
-                    for idx, h in enumerate(MODIFIABLE_HEATERS):
-                        cluster = cluster_assignments[idx]
-                        config[h] = cluster_voltages[cluster]
-                        
-                elif strategy == 3:
-                    # Sparse pattern - most values low with few random high points
-                    base_value = min(VOLTAGE_OPTIONS)
-                    peak_value = max(VOLTAGE_OPTIONS)
-                    config = {h: base_value for h in MODIFIABLE_HEATERS}
-                    
-                    # Number of peaks varies each time
-                    num_peaks = random.randint(1, len(MODIFIABLE_HEATERS) // 3)
-                    peak_positions = random.sample(MODIFIABLE_HEATERS, num_peaks)
-                    
-                    for pos in peak_positions:
-                        config[pos] = peak_value
-                        
-                elif strategy == 4:
-                    # Gradient with random starting point and direction
-                    start_idx = random.randint(0, len(VOLTAGE_OPTIONS)-1)
-                    direction = random.choice([-1, 1])
-                    step_size = random.randint(1, 3)
-                    
-                    for i, h in enumerate(MODIFIABLE_HEATERS):
-                        idx = (start_idx + direction * i * step_size) % len(VOLTAGE_OPTIONS)
-                        config[h] = VOLTAGE_OPTIONS[idx]
-                        
-                else:
-                    # Completely random configuration
-                    config = {h: random.choice(VOLTAGE_OPTIONS) for h in MODIFIABLE_HEATERS}
-                
-                # Add fixed first layer values
-                for h in FIXED_FIRST_LAYER:
-                    if h not in INPUT_HEATERS:
-                        config[h] = 0.01
-                
-                # Check if this configuration is unique
+            # Create configuration (with discretization to allowed voltages)
+            config = {}
+            for j, h in enumerate(MODIFIABLE_HEATERS):
+                config[h] = closest_voltage(voltages[j])
+            
+            # Add fixed first layer values
+            for h in FIXED_FIRST_LAYER:
+                if h not in INPUT_HEATERS:
+                    config[h] = 0.01
+            
+            # Check if configuration is unique
+            config_tuple = tuple(sorted(config.items()))
+            if config_tuple in tried_configs:
+                # Simple perturbation if duplicate
+                for h in random.sample(MODIFIABLE_HEATERS, 3):  # Perturb 3 random heaters
+                    config[h] = random.choice(VOLTAGE_OPTIONS)
                 config_tuple = tuple(sorted(config.items()))
-                if config_tuple not in tried_configs:
-                    unique_config_found = True
-                    tried_configs.add(config_tuple)
             
-            # If we couldn't find a unique config after several attempts,
-            # just make one with random perturbations until it's unique
-            if not unique_config_found:
-                base_config = {h: random.choice(VOLTAGE_OPTIONS) for h in MODIFIABLE_HEATERS}
-                
-                while True:
-                    # Add random perturbations
-                    config = base_config.copy()
-                    perturb_heaters = random.sample(MODIFIABLE_HEATERS, 
-                                                random.randint(1, len(MODIFIABLE_HEATERS)//2))
-                    for h in perturb_heaters:
-                        config[h] = random.choice(VOLTAGE_OPTIONS)
-                    
-                    # Add fixed first layer values
-                    for h in FIXED_FIRST_LAYER:
-                        if h not in INPUT_HEATERS:
-                            config[h] = 0.01
-                    
-                    config_tuple = tuple(sorted(config.items()))
-                    if config_tuple not in tried_configs:
-                        tried_configs.add(config_tuple)
-                        break
-            
-            # FIXED: Use config_idx + 1 consistently for display
-            current_iteration = config_idx + 1
-            total_iterations = num_random_configs
-            
-            # Evaluate the configuration and print the result
+            tried_configs.add(config_tuple)
+            # Evaluate configuration
             score, _ = self.evaluate_configuration(config)
-            print(f"Initial configuration {current_iteration}/{total_iterations}: Score = {score:.2f}")
+            print(f"Initial configuration {i+1}/{n_samples-1}: Score = {score:.2f}")
+        
+        # Optional: Add some fully random samples for exploration
+        n_random = max(0, (n_samples-1) // 4)  # 25% fully random samples
+        
+        for i in range(n_random):
+            config = {h: random.choice(VOLTAGE_OPTIONS) for h in MODIFIABLE_HEATERS}
+            for h in FIXED_FIRST_LAYER:
+                if h not in INPUT_HEATERS:
+                    config[h] = 0.01
+            
+            config_tuple = tuple(sorted(config.items()))
+            if config_tuple not in tried_configs:
+                tried_configs.add(config_tuple)
+                score, _ = self.evaluate_configuration(config)
+                print(f"Random configuration {i+1}/{n_random}: Score = {score:.2f}")    
 
     def train_surrogate_model(self):
         """Train surrogate model on collected data"""
@@ -618,12 +554,12 @@ class LogicGateOptimizer:
         self.train_surrogate_model()
         
         # Define bounds for optimization
-        bounds = [(0, len(VOLTAGE_OPTIONS_GRID)-1) for _ in range(len(MODIFIABLE_HEATERS))]
+        bounds = [(0, len(VOLTAGE_OPTIONS)-1) for _ in range(len(MODIFIABLE_HEATERS))]
         
         # Objective function for differential evolution
         def objective(indices):
             # Convert indices to voltages
-            voltages = [VOLTAGE_OPTIONS_GRID[int(round(idx))] for idx in indices]
+            voltages = [VOLTAGE_OPTIONS[int(round(idx))] for idx in indices]
             config = self.vector_to_config(voltages)
             
             # Use surrogate model for faster evaluation
@@ -643,7 +579,7 @@ class LogicGateOptimizer:
         
         # Convert result to configuration
         indices = [int(round(idx)) for idx in result.x]
-        voltages = [VOLTAGE_OPTIONS_GRID[idx] for idx in indices]
+        voltages = [VOLTAGE_OPTIONS[idx] for idx in indices]
         best_config = self.vector_to_config(voltages)
         
         # Evaluate on actual hardware
@@ -708,7 +644,7 @@ class LogicGateOptimizer:
         print(f"Starting {self.gate_type} gate optimization...")
         
         # Phase 1: Initial exploration
-        self.initial_sampling(n_samples=25)
+        self.initial_sampling(n_samples=30)
         
         # Phase 2: Train initial surrogate model
         self.train_surrogate_model()
