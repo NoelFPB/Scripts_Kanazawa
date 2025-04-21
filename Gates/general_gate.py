@@ -53,7 +53,7 @@ INPUT_COMBINATIONS = [(LOW_VOLTAGE, LOW_VOLTAGE),
                      (HIGH_VOLTAGE, HIGH_VOLTAGE)]
 
 # Voltage options for discretization
-def create_voltage_options(start=0, end=4.9, step=0.2):
+def create_voltage_options(start=0, end=4.9, step=0.1):
     options = []
     current = start
     options.append(0.1)
@@ -644,7 +644,7 @@ class LogicGateOptimizer:
         print(f"Starting {self.gate_type} gate optimization...")
         
         # Phase 1: Initial exploration
-        self.initial_sampling(n_samples=30)
+        self.initial_sampling(n_samples=300)
         
         # Phase 2: Train initial surrogate model
         self.train_surrogate_model()
