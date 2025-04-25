@@ -146,60 +146,27 @@ Input A (H36): 0.00V -> 0.10V
 Input B (H37): 0.00V -> 0.10V
 
 Current outputs:
-O1: 1.451V
+O1: 1.443V
 
 Changed inputs:
 Input A (H36): 0.10V -> 0.10V
 Input B (H37): 0.10V -> 4.90V
 
 Current outputs:
-O1: 2.243V
+O1: 2.412V
 
 Changed inputs:
 Input A (H36): 0.10V -> 4.90V
 Input B (H37): 4.90V -> 0.10V
 
 Current outputs:
-O1: 3.803V
+O1: 2.452V
 
 Changed inputs:
 Input A (H36): 4.90V -> 4.90V
 Input B (H37): 0.10V -> 4.90V
 
 Current outputs:
-O1: 3.826V
+O1: 0.7891V
 
 ------------------------------------------------------------------------------------------------------
-
-
-XNOR gate:
-
-{0: 3.0, 1: 3.4, 2: 2.0, 3: 3.0, 4: 4.9, 5: 1.9, 6: 2.2, 7: 3.7, 8: 2.0, 9: 3.0, 10: 1.4, 11: 2.0, 12: 2.0, 13: 1.0, 14: 1.8, 15: 4.3, 16: 1.7, 17: 4.5, 18: 4.9, 19: 0.9, 20: 3.6, 21: 2.0, 22: 2.0, 23: 3.2, 24: 1.1, 25: 2.5, 26: 1.8, 27: 3.9, 28: 1.6, 29: 3.0, 30: 0.5, 31: 3.7, 32: 3.8, 33: 0.01, 34: 0.01, 35: 0.01, 36: 0.0, 37: 0.0, 38: 0.01, 39: 0.01}
-
-Changed inputs:
-Input A (H36): 0.00V -> 0.10V
-Input B (H37): 0.00V -> 0.10V
-
-Current outputs:
-O1: 1.669V
-
-Changed inputs:
-Input A (H36): 0.10V -> 0.10V
-Input B (H37): 0.10V -> 4.90V
-
-Current outputs:
-O1: 1.754V
-
-Changed inputs:
-Input A (H36): 0.10V -> 4.90V
-Input B (H37): 4.90V -> 0.10V
-
-Current outputs:
-O1: 2.932V
-
-Changed inputs:
-Input A (H36): 4.90V -> 4.90V
-Input B (H37): 0.10V -> 4.90V
-
-Current outputs:
-O1: 3.71V
