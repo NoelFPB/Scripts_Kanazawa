@@ -8,7 +8,7 @@ import pandas as pd
 data = pd.DataFrame({
     'Input A (V)': [0.10, 0.10, 4.90, 4.90],
     'Input B (V)': [0.10, 4.90, 0.10, 4.90],
-    'Output': [1.451, 2.243, 3.803, 3.826]
+    'Output': [1.443, 2.412, 2.452, 0.789]
 })
 
 # Create labels for each combination with A on top of B
