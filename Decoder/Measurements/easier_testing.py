@@ -78,7 +78,7 @@ def display_all_heaters(heater_values):
 
 def main():
     try:
-            initial_config = {0: 4.9, 1: 1.1, 2: 2.6, 3: 0.8, 4: 0.9, 5: 3.0, 6: 2.3, 7: 0.1, 8: 2.2, 9: 2.6, 10: 0.5, 11: 0.9, 12: 4.0, 13: 2.7, 14: 4.1, 15: 3.8, 16: 2.9, 17: 4.9, 18: 1.4, 19: 4.5, 20: 0.2, 21: 3.1, 22: 2.6, 23: 3.6, 24: 1.5, 25: 1.6, 26: 4.9, 27: 3.5, 28: 0.1, 29: 4.5, 30: 2.6, 31: 2.4, 32: 3.2, 33: 0.01, 34: 0.01, 35: 0.01, 36: 0.0, 37: 0.0, 38: 0.01, 39: 0.01}
+            initial_config = {0: 3.0, 1: 3.4, 2: 2.0, 3: 3.0, 4: 4.9, 5: 1.9, 6: 2.2, 7: 3.7, 8: 2.0, 9: 3.0, 10: 1.4, 11: 2.0, 12: 2.0, 13: 1.0, 14: 1.8, 15: 4.3, 16: 1.7, 17: 4.5, 18: 4.9, 19: 0.9, 20: 3.6, 21: 2.0, 22: 2.0, 23: 3.2, 24: 1.1, 25: 2.5, 26: 1.8, 27: 3.9, 28: 1.6, 29: 3.0, 30: 0.5, 31: 3.7, 32: 3.8, 33: 0.01, 34: 0.01, 35: 0.01, 36: 0.0, 37: 0.0, 38: 0.01, 39: 0.01}
             heater_values = {int(k): float(v) for k, v in initial_config.items()}
             scope, ser = init_hardware()
 
@@ -113,17 +113,17 @@ def main():
                     
                     # Log the change
                     
-                    clear_screen()
-                    print_help()
+                    #clear_screen()
+                    #print_help()
                     print(f"\nChanged inputs:")
                     print(f"Input A (H36): {prev_value_36:.2f}V -> {heater_values[36]:.2f}V")
                     print(f"Input B (H37): {prev_value_37:.2f}V -> {heater_values[37]:.2f}V")
                     
                     print(f"\nCurrent outputs:")
                     print(f"O1: {outputs[0]}V")
-                    print(f"O2: {outputs[1]}V")
-                    print(f"O3: {outputs[2]}V")
-                    print(f"O4: {outputs[3]}V")
+                    #print(f"O2: {outputs[1]}V")
+                    #rint(f"O3: {outputs[2]}V")
+                    #print(f"O4: {outputs[3]}V")
                     
                     prev_value_36 = heater_values[36]
                     prev_value_37 = heater_values[37]

@@ -7,50 +7,53 @@ from scipy.optimize import differential_evolution
 import random
 from itertools import product
 
+
+# Not working yet, pretty hard behaviour to achieve
+
 # Serial port configuration 
 SERIAL_PORT = 'COM4'
 BAUD_RATE = 115200
 
-# === GATE CONFIGURATION - MODIFY THIS SECTION ===
-# Logic gate type to optimize (AND, OR, NAND, NOR, XOR, XNOR, or CUSTOM)
-GATE_TYPE = "XNOR"
+# === DEMUX CONFIGURATION - MODIFY THIS SECTION ===
+# Demultiplexer setup 
+# A demultiplexer routes 1 input to 1 of several outputs based on select lines
+DATA_INPUT_HEATER = 36     # Data input 
+SELECT_HEATERS = [37, 38]  # Select lines (S0, S1)
 
-# Input heaters for logic gate
-INPUT_HEATERS = [36, 37]  # Our gate inputs
+# For a 1-to-4 demux with 2 select lines:
+# S1 S0 | Active Output
+# 0  0  | Output 0 (Channel 1)
+# 0  1  | Output 1 (Channel 2)
+# 1  0  | Output 2 (Channel 3)
+# 1  1  | Output 3 (Channel 4)
 
-# For CUSTOM gate type, define truth table as dict of tuples (input_a, input_b) -> expected_output
-# For standard gates, the truth table will be generated automatically
-# Use True for HIGH (>2.0V), False for LOW (<2.0V)
-# Example:
-# CUSTOM_TRUTH_TABLE = {
-#     (0.1, 0.1): False,  # 0 OP 0 = 0 (LOW)
-#     (0.1, 4.9): True,   # 0 OP 1 = 1 (HIGH)
-#     (4.9, 0.1): True,   # 1 OP 0 = 1 (HIGH)
-#     (4.9, 4.9): True,   # 1 OP 1 = 1 (HIGH)
-# }
-CUSTOM_TRUTH_TABLE = {}
-
-# Input voltage values representing LOW and HIGH states
+# Input/select line voltage values representing LOW and HIGH states
 LOW_VOLTAGE = 0.1    # Voltage representing logical LOW
 HIGH_VOLTAGE = 4.9   # Voltage representing logical HIGH
 
 # Output voltage thresholds
-LOW_THRESHOLD = 2  # Outputs below this are considered LOW
-OPTIMAL_LOW = 1.5
+LOW_THRESHOLD = 2.5   # Outputs below this are considered LOW
+OPTIMAL_LOW = 2     # Target for LOW output
 
-HIGH_THRESHOLD = 4 # Outputs above this start to be considered HIGH
-OPTIMAL_HIGH = 4.5   # Optimal HIGH output
-
+HIGH_THRESHOLD = 3.5  # Outputs above this are considered HIGH
+OPTIMAL_HIGH = 4    # Target for HIGH output
 
 # Heater configuration
 FIXED_FIRST_LAYER = list(range(33, 40))
-MODIFIABLE_HEATERS = [i for i in range(33) if i not in INPUT_HEATERS]
+MODIFIABLE_HEATERS = [i for i in range(33) if i not in [DATA_INPUT_HEATER] + SELECT_HEATERS]
 
-# Input states for gate testing will be generated based on selected gate type
-INPUT_COMBINATIONS = [(LOW_VOLTAGE, LOW_VOLTAGE),
-                     (LOW_VOLTAGE, HIGH_VOLTAGE),
-                     (HIGH_VOLTAGE, LOW_VOLTAGE),
-                     (HIGH_VOLTAGE, HIGH_VOLTAGE)]
+# Test configurations for demux
+# Format: (data_input, select_s0, select_s1)
+TEST_CONFIGURATIONS = [
+    (LOW_VOLTAGE, LOW_VOLTAGE, LOW_VOLTAGE),   # Low data, select 00 (output 0 should be low)
+    (HIGH_VOLTAGE, LOW_VOLTAGE, LOW_VOLTAGE),  # High data, select 00 (output 0 should be high)
+    (LOW_VOLTAGE, HIGH_VOLTAGE, LOW_VOLTAGE),  # Low data, select 01 (output 1 should be low)
+    (HIGH_VOLTAGE, HIGH_VOLTAGE, LOW_VOLTAGE), # High data, select 01 (output 1 should be high)
+    (LOW_VOLTAGE, LOW_VOLTAGE, HIGH_VOLTAGE),  # Low data, select 10 (output 2 should be low)
+    (HIGH_VOLTAGE, LOW_VOLTAGE, HIGH_VOLTAGE), # High data, select 10 (output 2 should be high)
+    (LOW_VOLTAGE, HIGH_VOLTAGE, HIGH_VOLTAGE), # Low data, select 11 (output 3 should be low)
+    (HIGH_VOLTAGE, HIGH_VOLTAGE, HIGH_VOLTAGE) # High data, select 11 (output 3 should be high)
+]
 
 # Voltage options for discretization
 def create_voltage_options(start=0, end=4.9, step=0.1):
@@ -59,9 +62,8 @@ def create_voltage_options(start=0, end=4.9, step=0.1):
     options.append(0.1)
     
     while current <= end:
-        options.append(round(current, 2))  # Round to 1 decimal place to avoid floating point issues
+        options.append(round(current, 2))  # Round to 2 decimal places
         current += step
-        
     
     # Add the final value (4.9) if it's not already included
     if end not in options:
@@ -71,55 +73,18 @@ def create_voltage_options(start=0, end=4.9, step=0.1):
         
     return options
 
-# Example usage with default step size of 0.5V
+# Voltage options with different granularity
 VOLTAGE_OPTIONS = create_voltage_options()
-VOLTAGE_OPTIONS_GRID = create_voltage_options(start = 0, end = 4.9, step = 0.5)
+VOLTAGE_OPTIONS_GRID = create_voltage_options(start=0, end=4.9, step=0.5)
 print(VOLTAGE_OPTIONS)
 
-# Generate truth table based on gate type
-def generate_truth_table(gate_type):
-    """Generate truth table based on selected gate type"""
-    if gate_type == "CUSTOM" and CUSTOM_TRUTH_TABLE:
-        return CUSTOM_TRUTH_TABLE
-    
-    truth_table = {}
-    inputs = [(LOW_VOLTAGE, LOW_VOLTAGE), 
-              (LOW_VOLTAGE, HIGH_VOLTAGE), 
-              (HIGH_VOLTAGE, LOW_VOLTAGE), 
-              (HIGH_VOLTAGE, HIGH_VOLTAGE)]
-    
-    if gate_type == "AND":
-        outputs = [False, False, False, True]
-    elif gate_type == "OR":
-        outputs = [False, True, True, True]
-    elif gate_type == "NAND":
-        outputs = [True, True, True, False]
-    elif gate_type == "NOR":
-        outputs = [True, False, False, False]
-    elif gate_type == "XOR":
-        outputs = [False, True, True, False]
-    elif gate_type == "XNOR":
-        outputs = [True, False, False, True]
-    else:
-        raise ValueError(f"Unknown gate type: {gate_type}")
-    
-    for i, input_pair in enumerate(inputs):
-        truth_table[input_pair] = outputs[i]
-    
-    return truth_table
 
-class LogicGateOptimizer:
+class DemuxOptimizer:
     """
-    Optimize a physical logic gate using ensemble learning and evolutionary strategies.
+    Optimize a physical demultiplexer using ensemble learning and evolutionary strategies.
     """
-    def __init__(self, gate_type=GATE_TYPE):
-        # Initialize gate type and truth table
-        self.gate_type = gate_type
-        self.truth_table = generate_truth_table(gate_type)
-        
-        print(f"Optimizing {gate_type} gate with truth table:")
-        for inputs, output in self.truth_table.items():
-            print(f"  {inputs} -> {'HIGH' if output else 'LOW'}")
+    def __init__(self):
+        print("Initializing demultiplexer optimization...")
         
         # Initialize hardware connections
         self.scope = self._init_scope()
@@ -127,7 +92,6 @@ class LogicGateOptimizer:
         time.sleep(1)
         
         # Initialize Random Forest model for surrogate modeling
-        # Random Forest is more robust to noisy data than Gaussian Process
         self.model = RandomForestRegressor(
             n_estimators=50,
             max_depth=5,
@@ -144,7 +108,7 @@ class LogicGateOptimizer:
         self.best_score = float('-inf')
         
     def _init_scope(self):
-        """Initialize oscilloscope for logic gate output measurement"""
+        """Initialize oscilloscope for demux output measurement"""
         rm = pyvisa.ResourceManager()
         resources = rm.list_resources()
         if not resources:
@@ -152,14 +116,11 @@ class LogicGateOptimizer:
         scope = rm.open_resource(resources[0])
         scope.timeout = 5000
 
-        # Setup Channel 1 for logic gate output measurement
-        scope.write(':CHANnel1:DISPlay ON')
-        scope.write(':CHANnel1:SCALe 2')
-        scope.write(':CHANnel1:OFFSet -6')
-
-        # Turn off other channels
-        for channel_num in range(2, 5):
-            scope.write(f':CHANnel{channel_num}:DISPlay OFF')
+        # Setup all 4 channels for demux output measurement
+        for channel_num in range(1, 5):
+            scope.write(f':CHANnel{channel_num}:DISPlay ON')
+            scope.write(f':CHANnel{channel_num}:SCALe 2')
+            scope.write(f':CHANnel{channel_num}:OFFSet -6')
             
         return scope
     
@@ -172,14 +133,17 @@ class LogicGateOptimizer:
         self.serial.reset_input_buffer()
         self.serial.reset_output_buffer()
     
-    def measure_output(self):
-        """Measure the logic gate output voltage from oscilloscope"""
+    def measure_outputs(self):
+        """Measure all 4 demux output voltages from oscilloscope"""
         try:
-            value = float(self.scope.query(':MEASure:STATistic:ITEM? CURRent,VMAX,CHANnel1'))
-            return round(value, 5)
+            outputs = []
+            for channel in range(1, 5):
+                value = float(self.scope.query(f':MEASure:STATistic:ITEM? CURRent,VMAX,CHANnel{channel}'))
+                outputs.append(round(value, 5))
+            return outputs
         except Exception as e:
             print(f"Measurement error: {e}")
-            return None
+            return [None] * 4
     
     def config_to_vector(self, config):
         """Convert configuration dictionary to feature vector for model"""
@@ -191,14 +155,15 @@ class LogicGateOptimizer:
         
         # Add fixed first layer values
         for h in FIXED_FIRST_LAYER:
-            if h not in INPUT_HEATERS:
+            if h not in [DATA_INPUT_HEATER] + SELECT_HEATERS:
                 config[h] = 0.01
                 
         return config
     
     def evaluate_configuration(self, config):
         """
-        Evaluate a configuration for logic gate behavior based on truth table.
+        Evaluate demultiplexer configuration based on how well it routes inputs
+        to the appropriate output based on select lines.
         """
         # Check if we've already evaluated this configuration
         config_key = tuple(config.get(h, 0.1) for h in sorted(config.keys()))
@@ -211,54 +176,74 @@ class LogicGateOptimizer:
         total_score = 0
         results = []
         
-        # Test each input combination
-        for input_state in INPUT_COMBINATIONS:
-            current_config = config.copy()
-            current_config[INPUT_HEATERS[0]] = input_state[0]
-            current_config[INPUT_HEATERS[1]] = input_state[1]
+        # Test each input/select combination
+        for test_config in TEST_CONFIGURATIONS:
+            data_value, select_s0, select_s1 = test_config
             
-            # Get expected output from truth table
-            expected_high = self.truth_table[input_state]
+            # Determine which output should be active based on select lines
+            expected_output_idx = (1 if select_s0 > LOW_THRESHOLD else 0) + 2 * (1 if select_s1 > LOW_THRESHOLD else 0)
+            
+            # Set up current test configuration
+            current_config = config.copy()
+            current_config[DATA_INPUT_HEATER] = data_value
+            current_config[SELECT_HEATERS[0]] = select_s0
+            current_config[SELECT_HEATERS[1]] = select_s1
             
             # Send configuration to hardware
             self.send_heater_values(current_config)
             time.sleep(0.20)  # Wait for the system to stabilize
             
-            # Measure output
-            output = self.measure_output()
-            if output is None:
+            # Measure all outputs
+            outputs = self.measure_outputs()
+            if None in outputs:
                 return -1000, []  # Return a large negative score on error
             
-            # Score based on expected output
-            if expected_high:  # Should be HIGH
-                if output > OPTIMAL_HIGH and output < 6:
-                    # Stronger reward for cleaner HIGH signal
-                    total_score += 40 + (5 * output)
-                elif output > HIGH_THRESHOLD and output < 6:
-                    # Acceptable but not optimal
-                    total_score += 20 + (5 * output)
-                else:
-                    # Severe penalty for incorrect behavior
-                    total_score -= 50 + ((5.0 - output) * (5.0 - output))
-            else:  # Should be LOW
-                if output < OPTIMAL_LOW:
-                    # Stronger reward for cleaner LOW signal
-                    total_score += 40 + (20 * np.exp(-output))
-                elif output < LOW_THRESHOLD:
-                    # Acceptable but not optimal
-                    total_score += 20 + (10 * (1.5 - output))
-                else:
-                    # Severe penalty for incorrect behavior
-                    total_score -= 50 + (output * output)
+            # Score based on whether the correct output is active
+            # and whether inactive outputs are LOW
+            expected_values = [LOW_VOLTAGE] * 4
+            expected_values[expected_output_idx] = data_value  # The selected output should match the data input
+            
+            for i, (output, expected) in enumerate(zip(outputs, expected_values)):
+                if expected > LOW_THRESHOLD:  # Should be HIGH
+                    if output > OPTIMAL_HIGH and output < 6:
+                        # Stronger reward for cleaner HIGH signal on the correct output
+                        total_score += 40 + (5 * output)
+                    elif output > HIGH_THRESHOLD and output < 6:
+                        # Acceptable but not optimal
+                        total_score += 20 + (5 * output)
+                    else:
+                        # Severe penalty for incorrect behavior
+                        total_score -= 50 + ((5.0 - output) * (5.0 - output))
+                else:  # Should be LOW
+                    if output < OPTIMAL_LOW:
+                        # Stronger reward for cleaner LOW signal on inactive outputs
+                        total_score += 40 + (20 * np.exp(-output))
+                    elif output < LOW_THRESHOLD:
+                        # Acceptable but not optimal
+                        total_score += 20 + (10 * (1.5 - output))
+                    else:
+                        # Severe penalty for incorrect behavior
+                        total_score -= 50 + (output * output)
+            
+            # Additional bonus for separation between active and inactive outputs
+            active_output = outputs[expected_output_idx]
+            inactive_outputs = [out for i, out in enumerate(outputs) if i != expected_output_idx]
+            
+            if active_output > LOW_THRESHOLD and max(inactive_outputs) < LOW_THRESHOLD:
+                # Bonus for clean separation
+                separation = active_output - max(inactive_outputs)
+                total_score += separation * 10  # Reward separation
             
             # Record results
-            actual_high = output > LOW_THRESHOLD
             results.append({
-                'inputs': input_state,
-                'output': output,
-                'expected': 'HIGH' if expected_high else 'LOW',
-                'actual': 'HIGH' if actual_high else 'LOW',
-                'correct': expected_high == actual_high
+                'data_input': data_value,
+                'select_lines': (select_s0, select_s1),
+                'outputs': outputs,
+                'expected_active': expected_output_idx,
+                'correctly_routed': (
+                    outputs[expected_output_idx] > HIGH_THRESHOLD if data_value > LOW_THRESHOLD 
+                    else outputs[expected_output_idx] < LOW_THRESHOLD
+                )
             })
         
         # Add to history
@@ -273,7 +258,6 @@ class LogicGateOptimizer:
         
         return total_score, results
     
-    
     def initial_sampling(self, n_samples=10):
         """Initial sampling using Latin Hypercube Sampling (LHS) for better space coverage"""
         from scipy.stats import qmc  # More standard library for experimental design
@@ -283,7 +267,7 @@ class LogicGateOptimizer:
         # Zero configuration (baseline)
         zero_config = {h: 0.1 for h in MODIFIABLE_HEATERS}
         for h in FIXED_FIRST_LAYER:
-            if h not in INPUT_HEATERS:
+            if h not in [DATA_INPUT_HEATER] + SELECT_HEATERS:
                 zero_config[h] = 0.01
         
         score, _ = self.evaluate_configuration(zero_config)
@@ -320,7 +304,7 @@ class LogicGateOptimizer:
             
             # Add fixed first layer values
             for h in FIXED_FIRST_LAYER:
-                if h not in INPUT_HEATERS:
+                if h not in [DATA_INPUT_HEATER] + SELECT_HEATERS:
                     config[h] = 0.01
             
             # Check if configuration is unique
@@ -342,14 +326,14 @@ class LogicGateOptimizer:
         for i in range(n_random):
             config = {h: random.choice(VOLTAGE_OPTIONS) for h in MODIFIABLE_HEATERS}
             for h in FIXED_FIRST_LAYER:
-                if h not in INPUT_HEATERS:
+                if h not in [DATA_INPUT_HEATER] + SELECT_HEATERS:
                     config[h] = 0.01
             
             config_tuple = tuple(sorted(config.items()))
             if config_tuple not in tried_configs:
                 tried_configs.add(config_tuple)
                 score, _ = self.evaluate_configuration(config)
-                print(f"Random configuration {i+1}/{n_random}: Score = {score:.2f}")    
+                print(f"Random configuration {i+1}/{n_random}: Score = {score:.2f}")
 
     def train_surrogate_model(self):
         """Train surrogate model on collected data"""
@@ -397,7 +381,7 @@ class LogicGateOptimizer:
         while len(population) < population_size:
             config = {h: random.choice(VOLTAGE_OPTIONS) for h in MODIFIABLE_HEATERS}
             for h in FIXED_FIRST_LAYER:
-                if h not in INPUT_HEATERS:
+                if h not in [DATA_INPUT_HEATER] + SELECT_HEATERS:
                     config[h] = 0.01
             population.append(config)
         
@@ -461,7 +445,7 @@ class LogicGateOptimizer:
                 
                 # Add fixed layer values
                 for h in FIXED_FIRST_LAYER:
-                    if h not in INPUT_HEATERS:
+                    if h not in [DATA_INPUT_HEATER] + SELECT_HEATERS:
                         child[h] = 0.01
                 
                 new_population.append(child)
@@ -640,17 +624,17 @@ class LogicGateOptimizer:
         return current_config, current_score
     
     def optimize(self):
-        """Run multi-stage optimization for logic gate"""
-        print(f"Starting {self.gate_type} gate optimization...")
+        """Run multi-stage optimization for demultiplexer"""
+        print("Starting demultiplexer optimization...")
         
         # Phase 1: Initial exploration
-        self.initial_sampling(n_samples=300)
+        self.initial_sampling(n_samples=200)
         
         # Phase 2: Train initial surrogate model
         self.train_surrogate_model()
         
         # Phase 3: Evolutionary optimization
-        self.evolution_step(population_size=8  , generations=3)
+        self.evolution_step(population_size=8, generations=3)
         
         # Phase 4: Retrain surrogate model  
         self.train_surrogate_model()
@@ -670,45 +654,62 @@ class LogicGateOptimizer:
         return final_config, final_score
     
     def test_final_configuration(self, config):
-        """Test and print performance of the optimized configuration"""
-        print(f"\nTesting final {self.gate_type} gate configuration:")
+        """Test and print performance of the optimized demultiplexer"""
+        print("\nTesting final demultiplexer configuration:")
         all_correct = True
         
-        for input_state in INPUT_COMBINATIONS:
-            current_config = config.copy()
-            current_config[INPUT_HEATERS[0]] = input_state[0]
-            current_config[INPUT_HEATERS[1]] = input_state[1]
+        for test_config in TEST_CONFIGURATIONS:
+            data_value, select_s0, select_s1 = test_config
             
+            # Determine which output should be active based on select lines
+            expected_output_idx = (1 if select_s0 > LOW_THRESHOLD else 0) + 2 * (1 if select_s1 > LOW_THRESHOLD else 0)
+            
+            # Set up current test configuration
+            current_config = config.copy()
+            current_config[DATA_INPUT_HEATER] = data_value
+            current_config[SELECT_HEATERS[0]] = select_s0
+            current_config[SELECT_HEATERS[1]] = select_s1
+            
+            # Send configuration to hardware
             self.send_heater_values(current_config)
             time.sleep(0.25)
-            output_value = self.measure_output()
-                        
-            # Check if output is in the right range based on expected output
-            expected_high = self.truth_table[input_state]
             
-            if expected_high:
-                is_correct = output_value > HIGH_THRESHOLD
-                output_state = "HIGH" if output_value > HIGH_THRESHOLD else "LOW"
-            else:
-                is_correct = output_value < LOW_THRESHOLD
-                output_state = "LOW" if output_value < LOW_THRESHOLD else "HIGH"
-
+            # Measure all outputs
+            outputs = self.measure_outputs()
+            
+            # Check if the correct output is active and others are inactive
+            expected_active_output = data_value  # Expected output matches input value
+            
+            # Define what "active" means based on data input value
+            if data_value > LOW_THRESHOLD:  # HIGH input
+                expected_active = expected_output_idx
+                is_correct = (outputs[expected_active] > HIGH_THRESHOLD and 
+                             all(out < LOW_THRESHOLD for i, out in enumerate(outputs) if i != expected_active))
+            else:  # LOW input - all outputs should be LOW
+                is_correct = all(out < LOW_THRESHOLD for out in outputs)
+            
             if not is_correct:
                 all_correct = False
-
-            print(f"\nInputs (A, B): {input_state}")
-            print(f"{self.gate_type} Output: {output_value:.4f}V")
-            print(f"Output is: {output_state}")
-            print(f"Expected: {'HIGH' if expected_high else 'LOW'}")
-            print(f"Correct: {'Yes' if is_correct else 'No'}")
-                    
+            
+            # Determine status of each output (HIGH/LOW)
+            output_states = ["HIGH" if out > HIGH_THRESHOLD else "LOW" for out in outputs]
+            
+            print(f"\nTest Case:")
+            print(f"  Data Input: {'HIGH' if data_value > HIGH_THRESHOLD else 'LOW'} ({data_value}V)")
+            print(f"  Select Lines (S0, S1): {select_s0}V, {select_s1}V")
+            print(f"  Select Code: {int(select_s0 > HIGH_THRESHOLD)}{int(select_s1 > HIGH_THRESHOLD)}")
+            print(f"  Expected Active Output: Channel {expected_output_idx+1}")
+            print(f"  Measured Outputs:")
+            for i, (out, state) in enumerate(zip(outputs, output_states)):
+                print(f"    Channel {i+1}: {out:.4f}V ({state})")
+            print(f"  Correct Routing: {'Yes' if is_correct else 'No'}")
+        
         if all_correct:
-            print(f"\nSuccess! The {self.gate_type} gate is working correctly for all input combinations.")
+            print("\nSuccess! The demultiplexer is working correctly for all input combinations.")
         else:
-            print(f"\nThe {self.gate_type} gate is not working perfectly for all input combinations.")
+            print("\nThe demultiplexer is not working perfectly for all input combinations.")
         
         return all_correct
-
 
     def cleanup(self):
         """Close connections"""
@@ -727,26 +728,23 @@ class LogicGateOptimizer:
             
         # Make sure fixed first layer heaters are set correctly
         for h in FIXED_FIRST_LAYER:
-            if h not in INPUT_HEATERS:  # Don't override input heaters
+            if h not in [DATA_INPUT_HEATER] + SELECT_HEATERS:  # Don't override input/select heaters
                 complete_config[h] = 0.01
                 
         # Format all values to 2 decimal places
         return {k: round(float(v), 2) for k, v in complete_config.items()}
-
+    
 
 def main():
-    # Select gate type at runtime - modify this line to change gate type
-    gate_type = GATE_TYPE  # Use the value from configuration section
-    
-    # Create optimizer for the selected gate type
-    optimizer = LogicGateOptimizer(gate_type)
-    
+    # Create demultiplexer optimizer
+    optimizer = DemuxOptimizer()
+
     try:
         # Run optimization
         best_config, best_score = optimizer.optimize()
         
         # Print final heater configuration
-        print(f"\nFinal {gate_type} Gate Heater Configuration:")
+        print("\nFinal Demultiplexer Heater Configuration:")
         print(f"Best score: {best_score}")
         
         clean_config = optimizer.format_config(best_config)
@@ -755,9 +753,10 @@ def main():
         # Test final configuration
         optimizer.test_final_configuration(best_config)
         
+        
     except Exception as e:
         print(f"Error: {e}")
-    
+
     finally:
         optimizer.cleanup()
 
