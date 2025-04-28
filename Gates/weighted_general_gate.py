@@ -35,11 +35,11 @@ LOW_VOLTAGE = 0.1    # Voltage representing logical LOW
 HIGH_VOLTAGE = 4.9   # Voltage representing logical HIGH
 
 # Output voltage thresholds
-LOW_THRESHOLD = 2  # Outputs below this are considered LOW
-OPTIMAL_LOW = 1.5
+LOW_THRESHOLD = 1.5  # Outputs below this are considered LOW
+OPTIMAL_LOW = 1
 
-HIGH_THRESHOLD = 4 # Outputs above this start to be considered HIGH
-OPTIMAL_HIGH = 4.5   # Optimal HIGH output
+HIGH_THRESHOLD = 4.5 # Outputs above this start to be considered HIGH
+OPTIMAL_HIGH = 4.9   # Optimal HIGH output
 
 
 # Heater configuration
@@ -195,63 +195,57 @@ class LogicGateOptimizer:
                 config[h] = 0.01
                 
         return config
-    
+
     def evaluate_configuration(self, config):
         """
-        Evaluate a configuration for logic gate behavior based on truth table.
+        Evaluate a configuration with emphasis on output state consistency.
         """
-        # Check if we've already evaluated this configuration
+        # Check if already evaluated
         config_key = tuple(config.get(h, 0.1) for h in sorted(config.keys()))
         for i, past_config in enumerate(self.configs_evaluated):
             past_key = tuple(past_config.get(h, 0.1) for h in sorted(past_config.keys()))
             if config_key == past_key:
                 return self.scores_evaluated[i], None
         
-        # If not in history, evaluate on hardware
-        total_score = 0
+        # Component weights (sum to 1.0)
+        WEIGHTS = {
+            'high_state': 0.2,      # HIGH output performance
+            'low_state': 0.2,       # LOW output performance
+            'high_consistency': 0.20, # Consistency of HIGH outputs
+            'low_consistency': 0.10,  # Consistency of LOW outputs
+            'separation': 0.30       # Separation between HIGH/LOW
+        }
+        
+        # Initialize scores
+        component_scores = {k: 0.0 for k in WEIGHTS}
         results = []
         
-        # Test each input combination
+        # Collect all outputs for consistency calculation
+        high_outputs = []
+        low_outputs = []
+        
+        # First pass - collect all outputs
         for input_state in INPUT_COMBINATIONS:
             current_config = config.copy()
             current_config[INPUT_HEATERS[0]] = input_state[0]
             current_config[INPUT_HEATERS[1]] = input_state[1]
             
-            # Get expected output from truth table
             expected_high = self.truth_table[input_state]
             
-            # Send configuration to hardware
             self.send_heater_values(current_config)
-            time.sleep(0.20)  # Wait for the system to stabilize
+            time.sleep(0.20)
             
-            # Measure output
             output = self.measure_output()
             if output is None:
-                return -1000, []  # Return a large negative score on error
+                return -1000, []
             
-            # Score based on expected output
-            if expected_high:  # Should be HIGH
-                if output > OPTIMAL_HIGH and output < 6:
-                    # Stronger reward for cleaner HIGH signal
-                    total_score += 40 + (5 * output)
-                elif output > HIGH_THRESHOLD and output < 6:
-                    # Acceptable but not optimal
-                    total_score += 20 + (5 * output)
-                else:
-                    # Severe penalty for incorrect behavior
-                    total_score -= 50 + ((5.0 - output) * (5.0 - output))
-            else:  # Should be LOW
-                if output < OPTIMAL_LOW:
-                    # Stronger reward for cleaner LOW signal
-                    total_score += 40 + (20 * np.exp(-output))
-                elif output < LOW_THRESHOLD:
-                    # Acceptable but not optimal
-                    total_score += 20 + (10 * (1.5 - output))
-                else:
-                    # Severe penalty for incorrect behavior
-                    total_score -= 50 + (output * output)
-            
-            # Record results
+            # Collect outputs based on expected state
+            if expected_high:
+                high_outputs.append(output)
+            else:
+                low_outputs.append(output)
+                
+            # Store results for scoring
             actual_high = output > LOW_THRESHOLD
             results.append({
                 'inputs': input_state,
@@ -261,19 +255,100 @@ class LogicGateOptimizer:
                 'correct': expected_high == actual_high
             })
         
+        # If we have missing state combinations, penalize
+        if not high_outputs or not low_outputs:
+            return -500, results
+        
+        # Second pass - calculate individual state scores
+        for result in results:
+            output = result['output']
+            expected_high = result['expected'] == 'HIGH'
+            
+            # Score for HIGH states
+            if expected_high:
+                if output >= OPTIMAL_HIGH:
+                    high_score = 1.0
+                elif output >= HIGH_THRESHOLD:
+                    high_score = 0.5 + 0.5 * ((output - HIGH_THRESHOLD) / (OPTIMAL_HIGH - HIGH_THRESHOLD))
+                else:
+                    high_score = max(0.0, 0.5 * (output / HIGH_THRESHOLD))
+                
+                component_scores['high_state'] += high_score / len(high_outputs)
+            
+            # Score for LOW states
+            else:
+                if output <= OPTIMAL_LOW:
+                    low_score = 1.0
+                elif output <= LOW_THRESHOLD:
+                    low_score = 0.5 + 0.5 * ((LOW_THRESHOLD - output) / (LOW_THRESHOLD - OPTIMAL_LOW))
+                else:
+                    low_score = max(0.0, 0.5 * (1 - min(1, (output - LOW_THRESHOLD) / 2)))
+                
+                component_scores['low_state'] += low_score / len(low_outputs)
+        
+        # Calculate consistency scores
+        # For HIGH states
+        if len(high_outputs) > 1:
+            avg_high = sum(high_outputs) / len(high_outputs)
+            high_variance = sum((o - avg_high)**2 for o in high_outputs) / len(high_outputs)
+            # Convert variance to consistency score (lower variance = higher consistency)
+            # Scale to reasonable voltage variance (0.25V² is considered good consistency)
+            component_scores['high_consistency'] = 1.0 / (1.0 + (high_variance / 0.25))
+        elif len(high_outputs) == 1:
+            # Can't measure consistency with just one output
+            component_scores['high_consistency'] = 0.5
+        
+        # For LOW states
+        if len(low_outputs) > 1:
+            avg_low = sum(low_outputs) / len(low_outputs)
+            low_variance = sum((o - avg_low)**2 for o in low_outputs) / len(low_outputs)
+            # Convert variance to consistency score
+            component_scores['low_consistency'] = 1.0 / (1.0 + (low_variance / 0.25))
+        elif len(low_outputs) == 1:
+            component_scores['low_consistency'] = 0.5
+        
+        # Calculate separation between averages
+        avg_high = sum(high_outputs) / len(high_outputs) if high_outputs else 0
+        avg_low = sum(low_outputs) / len(low_outputs) if low_outputs else 0
+        separation = avg_high - avg_low
+        
+        # Score separation (normalized to ideal separation)
+        ideal_separation = OPTIMAL_HIGH - OPTIMAL_LOW
+        component_scores['separation'] = min(1.0, separation / ideal_separation) if separation > 0 else 0.0
+        
+        # Calculate final score (0-100)
+        final_score = sum(component_scores[k] * WEIGHTS[k] * 100 for k in WEIGHTS)
+        
+        # Add success bonus for completely correct configurations
+        success_count = sum(1 for r in results if r['correct'])
+        if success_count == len(INPUT_COMBINATIONS):
+            final_score += 20  # Bonus for perfect behavior
+        
         # Add to history
         self.configs_evaluated.append(config.copy())
-        self.scores_evaluated.append(total_score)
+        self.scores_evaluated.append(final_score)
         
         # Update best if improved
-        if total_score > self.best_score:
-            self.best_score = total_score
+        if final_score > self.best_score:
+            self.best_score = final_score
             self.best_config = config.copy()
-            print(f"New best score: {total_score:.2f}")
+            print(f"\nNew best score: {final_score:.2f}")
+            print(f"Components: HIGH={component_scores['high_state']:.2f}, " 
+                f"LOW={component_scores['low_state']:.2f}, "
+                f"HIGH_CONS={component_scores['high_consistency']:.2f}, "
+                f"LOW_CONS={component_scores['low_consistency']:.2f}, "
+                f"SEP={component_scores['separation']:.2f}")
+            print(f"Success count: {success_count}/{len(INPUT_COMBINATIONS)}")
+            
+            if high_outputs:
+                print(f"HIGH outputs: avg={sum(high_outputs)/len(high_outputs):.2f}V, " 
+                    f"min={min(high_outputs):.2f}V, max={max(high_outputs):.2f}V")
+            if low_outputs:
+                print(f"LOW outputs: avg={sum(low_outputs)/len(low_outputs):.2f}V, "
+                    f"min={min(low_outputs):.2f}V, max={max(low_outputs):.2f}V")
         
-        return total_score, results
-    
-    
+        return final_score, results
+
     def initial_sampling(self, n_samples=10):
         """Initial sampling using Latin Hypercube Sampling (LHS) for better space coverage"""
         from scipy.stats import qmc  # More standard library for experimental design
@@ -563,7 +638,7 @@ class LogicGateOptimizer:
             config = self.vector_to_config(voltages)
             
             # Use surrogate model for faster evaluation
-            return -self.predict_score(config)  # Negative because we're minimizing
+            return -self.predict_score(config)  # N     egative because we're minimizing
         
         # Run differential evolution
         result = differential_evolution(
@@ -644,13 +719,13 @@ class LogicGateOptimizer:
         print(f"Starting {self.gate_type} gate optimization...")
         
         # Phase 1: Initial exploration
-        self.initial_sampling(n_samples=30)
+        self.initial_sampling(n_samples=20)
         
         # Phase 2: Train initial surrogate model
         self.train_surrogate_model()
         
         # Phase 3: Evolutionary optimization
-        self.evolution_step(population_size=8  , generations=3)
+        self.evolution_step(population_size=16  , generations=3)
         
         # Phase 4: Retrain surrogate model  
         self.train_surrogate_model()
