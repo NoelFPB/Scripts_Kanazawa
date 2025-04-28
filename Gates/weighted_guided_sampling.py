@@ -38,8 +38,8 @@ HIGH_VOLTAGE = 4.9   # Voltage representing logical HIGH
 LOW_THRESHOLD = 1.5  # Outputs below this are considered LOW
 OPTIMAL_LOW = 1
 
-HIGH_THRESHOLD = 4.5 # Outputs above this start to be considered HIGH
-OPTIMAL_HIGH = 4.9   # Optimal HIGH output
+HIGH_THRESHOLD = 3.5 # Outputs above this start to be considered HIGH
+OPTIMAL_HIGH = 4   # Optimal HIGH output
 
 
 # Heater configuration
@@ -278,7 +278,7 @@ class LogicGateOptimizer:
                 low_outputs.append(output)
                 
             # Store results for scoring
-            actual_high = output > LOW_THRESHOLD
+            actual_high = output > HIGH_THRESHOLD
             results.append({
                 'inputs': input_state,
                 'output': output,
@@ -751,20 +751,20 @@ class LogicGateOptimizer:
         print(f"Starting {self.gate_type} gate optimization...")
 
         # === Phase 1: Small initial exploration ===
-        self.initial_sampling(n_samples=5)  # Small initial LHS
+        self.initial_sampling(n_samples=10)  # Small initial LHS
         self.train_surrogate_model()
         
         # === Phase 2: Progressive optimization cycle ===
-        N_CYCLES = 10
+        N_CYCLES = 5
         for cycle in range(N_CYCLES):
             print(f"\n=== Optimization cycle {cycle+1}/{N_CYCLES} ===")
             
             # 1. Model-based Evolution Step
-            self.evolution_step(population_size=8, generations=2)
+            self.evolution_step(population_size=8, generations=3)
             
             # 2. Uncertainty Sampling every 2 cycles (or when model looks stale)
             if cycle % 2 == 1:
-                self.sample_most_uncertain(n_samples=3)
+                self.sample_most_uncertain(n_samples=5)
             
             # 3. Retrain surrogate model
             self.train_surrogate_model()

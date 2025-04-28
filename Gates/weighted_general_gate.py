@@ -38,8 +38,8 @@ HIGH_VOLTAGE = 4.9   # Voltage representing logical HIGH
 LOW_THRESHOLD = 1.5  # Outputs below this are considered LOW
 OPTIMAL_LOW = 1
 
-HIGH_THRESHOLD = 4.5 # Outputs above this start to be considered HIGH
-OPTIMAL_HIGH = 4.9   # Optimal HIGH output
+HIGH_THRESHOLD = 3.5 # Outputs above this start to be considered HIGH
+OPTIMAL_HIGH = 4.1   # Optimal HIGH output
 
 
 # Heater configuration
@@ -211,9 +211,9 @@ class LogicGateOptimizer:
         WEIGHTS = {
             'high_state': 0.2,      # HIGH output performance
             'low_state': 0.2,       # LOW output performance
-            'high_consistency': 0.20, # Consistency of HIGH outputs
-            'low_consistency': 0.10,  # Consistency of LOW outputs
-            'separation': 0.30       # Separation between HIGH/LOW
+            'high_consistency': 0.40, # Consistency of HIGH outputs
+            'low_consistency': 0,  # Consistency of LOW outputs
+            'separation': 0.20       # Separation between HIGH/LOW
         }
         
         # Initialize scores
@@ -246,7 +246,7 @@ class LogicGateOptimizer:
                 low_outputs.append(output)
                 
             # Store results for scoring
-            actual_high = output > LOW_THRESHOLD
+            actual_high = output > HIGH_THRESHOLD
             results.append({
                 'inputs': input_state,
                 'output': output,
@@ -296,7 +296,7 @@ class LogicGateOptimizer:
             component_scores['high_consistency'] = 1.0 / (1.0 + (high_variance / 0.25))
         elif len(high_outputs) == 1:
             # Can't measure consistency with just one output
-            component_scores['high_consistency'] = 0.5
+            component_scores['high_consistency'] = 1
         
         # For LOW states
         if len(low_outputs) > 1:
@@ -305,7 +305,7 @@ class LogicGateOptimizer:
             # Convert variance to consistency score
             component_scores['low_consistency'] = 1.0 / (1.0 + (low_variance / 0.25))
         elif len(low_outputs) == 1:
-            component_scores['low_consistency'] = 0.5
+            component_scores['low_consistency'] = 1
         
         # Calculate separation between averages
         avg_high = sum(high_outputs) / len(high_outputs) if high_outputs else 0
@@ -719,7 +719,7 @@ class LogicGateOptimizer:
         print(f"Starting {self.gate_type} gate optimization...")
         
         # Phase 1: Initial exploration
-        self.initial_sampling(n_samples=20)
+        self.initial_sampling(n_samples=300)
         
         # Phase 2: Train initial surrogate model
         self.train_surrogate_model()
