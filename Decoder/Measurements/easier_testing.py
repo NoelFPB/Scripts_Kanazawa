@@ -4,6 +4,8 @@ import pyvisa
 import keyboard
 import os
 
+
+# USING as input 36 and 37
 # Serial port configuration
 SERIAL_PORT = 'COM4'
 BAUD_RATE = 115200
@@ -78,7 +80,7 @@ def display_all_heaters(heater_values):
 
 def main():
     try:
-            initial_config ={0: 3.5, 1: 1.1, 2: 4.0, 3: 4.7, 4: 4.4, 5: 1.9, 6: 3.0, 7: 3.2, 8: 0.5, 9: 2.3, 10: 1.5, 11: 4.0, 12: 3.8, 13: 4.7, 14: 4.1, 15: 4.5, 16: 2.7, 17: 2.5, 18: 4.1, 19: 4.0, 20: 4.1, 21: 2.1, 22: 1.9, 23: 1.5, 24: 4.9, 25: 3.5, 26: 3.5, 27: 4.6, 28: 1.7, 29: 1.9, 30: 4.4, 31: 4.5, 32: 3.1, 33: 0.01, 34: 0.01, 35: 0.01, 36: 0.0, 37: 0.0, 38: 0.01, 39: 0.01}
+            initial_config ={0: 0.6, 1: 2.5, 2: 2.2, 3: 4.9, 4: 1.7, 5: 1.9, 6: 2.9, 7: 2.8, 8: 0.5, 9: 4.5, 10: 3.8, 11: 2.4, 12: 1.2, 13: 0.5, 14: 3.5, 15: 2.5, 16: 0.9, 17: 4.4, 18: 3.2, 19: 4.0, 20: 3.4, 21: 4.0, 22: 2.4, 23: 3.0, 24: 4.4, 25: 4.3, 26: 0.5, 27: 3.5, 28: 2.8, 29: 4.5, 30: 2.0, 31: 3.1, 32: 0.8, 33: 0.01, 34: 0.01, 35: 0.01, 36: 0.01, 37: 0.0, 38: 0.0, 39: 0.01}
 
             heater_values = {int(k): float(v) for k, v in initial_config.items()}
             scope, ser = init_hardware()
@@ -122,9 +124,9 @@ def main():
                     
                     print(f"\nCurrent outputs:")
                     print(f"O1: {outputs[0]}V")
-                    #print(f"O2: {outputs[1]}V")
-                    #rint(f"O3: {outputs[2]}V")
-                    #print(f"O4: {outputs[3]}V")
+                    print(f"O2: {outputs[1]}V")
+                    print(f"O3: {outputs[2]}V")
+                    print(f"O4: {outputs[3]}V")
                     
                     prev_value_36 = heater_values[36]
                     prev_value_37 = heater_values[37]

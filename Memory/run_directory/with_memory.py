@@ -6,6 +6,10 @@ from sklearn.ensemble import RandomForestRegressor
 from scipy.optimize import differential_evolution
 import random
 from scipy.stats import qmc
+import os
+import pickle
+import datetime
+import json
 
 # Serial port configuration 
 SERIAL_PORT = 'COM4'
@@ -47,11 +51,16 @@ TEST_CONFIGURATIONS = [
     (HIGH_VOLTAGE, HIGH_VOLTAGE)   # Input 11 (output 3 should be high, others low)
 ]
 
+# File paths for persistence
+DATA_DIR = "./memory/decoder_data"
+MODEL_PATH = os.path.join(DATA_DIR, "surrogate_model.pkl")
+HISTORY_PATH = os.path.join(DATA_DIR, "evaluation_history.pkl")
+BEST_CONFIG_PATH = os.path.join(DATA_DIR, "best_configs.json")
+
 # Voltage options for discretization
 def create_voltage_options(start=0, end=4.9, step=0.1):
     options = []
     current = start
-    #options.append(0.1)
     
     while current <= end:
         options.append(round(current, 2))  # Round to 2 decimal places
@@ -68,15 +77,18 @@ def create_voltage_options(start=0, end=4.9, step=0.1):
 # Voltage options with different granularity
 VOLTAGE_OPTIONS = create_voltage_options()
 VOLTAGE_OPTIONS_GRID = create_voltage_options(start=0, end=4.9, step=0.5)
-print(VOLTAGE_OPTIONS)
 
 
 class DecoderOptimizer:
     """
     Optimize a physical decoder using ensemble learning and evolutionary strategies.
+    With persistence capabilities to save and load model data between runs.
     """
-    def __init__(self):
+    def __init__(self, load_previous=True):
         print("Initializing decoder optimization...")
+        
+        # Create data directory if it doesn't exist
+        os.makedirs(DATA_DIR, exist_ok=True)
         
         # Initialize hardware connections
         self.scope = self._init_scope()
@@ -95,10 +107,15 @@ class DecoderOptimizer:
         self.configs_evaluated = []
         self.scores_evaluated = []
         
-        # Best configuration found
+        # Best configurations found
         self.best_config = None
         self.best_score = float('-inf')
+        self.best_configs_history = []
         
+        # Load previous data if available and requested
+        if load_previous:
+            self.load_data()
+            
     def _init_scope(self):
         """Initialize oscilloscope for decoder output measurement"""
         rm = pyvisa.ResourceManager()
@@ -152,7 +169,6 @@ class DecoderOptimizer:
                 
         return config
     
-
     def evaluate_configuration(self, config):
         """Evaluate decoder configuration with consistency metrics."""
         # Check if already evaluated
@@ -168,7 +184,7 @@ class DecoderOptimizer:
             'low_state': 0.2,        # LOW output performance
             'high_consistency': 0.2, # Consistency across HIGH outputs
             'low_consistency': 0.2,  # Consistency across LOW outputs
-            'separation': 0.20        # Separation between HIGH/LOW
+            'separation': 0.2        # Separation between HIGH/LOW
         }
         
         # Initialize scores
@@ -191,7 +207,7 @@ class DecoderOptimizer:
             current_config[INPUT_PINS[0]] = input_a
             current_config[INPUT_PINS[1]] = input_b
             self.send_heater_values(current_config)
-            time.sleep(0.22)
+            time.sleep(0.20)
             
             outputs = self.measure_outputs()
             if None in outputs:
@@ -281,6 +297,17 @@ class DecoderOptimizer:
         if final_score > self.best_score:
             self.best_score = final_score
             self.best_config = config.copy()
+            
+            # Add to best configs history with timestamp
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.best_configs_history.append({
+                "timestamp": timestamp,
+                "score": final_score,
+                "config": self.format_config(config),
+                "success_count": success_count,
+                "component_scores": component_scores
+            })
+            
             print(f"\nNew best: Score={final_score:.2f}, Success={success_count}/{len(TEST_CONFIGURATIONS)}")
             print(f"Components: HIGH={component_scores['high_state']:.2f}, "
                 f"LOW={component_scores['low_state']:.2f}, "
@@ -294,12 +321,87 @@ class DecoderOptimizer:
             if all_low_outputs:
                 print(f"LOW outputs: avg={sum(all_low_outputs)/len(all_low_outputs):.2f}V, "
                     f"min={min(all_low_outputs):.2f}V, max={max(all_low_outputs):.2f}V")
+            
+            # Save data after each new best configuration
+            self.save_data()
         
         return final_score, results
+
+    def save_data(self):
+        """Save model, evaluation history, and best configurations to disk"""
+        print("Saving data to disk...")
+        
+        # Save surrogate model
+        if hasattr(self, 'model') and self.model is not None:
+            with open(MODEL_PATH, 'wb') as f:
+                pickle.dump(self.model, f)
+        
+        # Save evaluation history
+        with open(HISTORY_PATH, 'wb') as f:
+            history_data = {
+                'configs_evaluated': self.configs_evaluated,
+                'scores_evaluated': self.scores_evaluated,
+                'best_config': self.best_config,
+                'best_score': self.best_score
+            }
+            pickle.dump(history_data, f)
+        
+        # Save best configs history as JSON (more readable)
+        with open(BEST_CONFIG_PATH, 'w') as f:
+            json.dump(self.best_configs_history, f, indent=2)
+            
+        print(f"Data saved. Total configurations evaluated: {len(self.configs_evaluated)}")
+    
+    def load_data(self):
+        """Load model and evaluation history from disk if available"""
+        # Check if files exist
+        model_exists = os.path.isfile(MODEL_PATH)
+        history_exists = os.path.isfile(HISTORY_PATH)
+        best_configs_exists = os.path.isfile(BEST_CONFIG_PATH)
+        
+        if not (model_exists and history_exists):
+            print("No previous data found. Starting fresh.")
+            return False
+        
+        try:
+            # Load surrogate model
+            if model_exists:
+                with open(MODEL_PATH, 'rb') as f:
+                    self.model = pickle.load(f)
+                print("Loaded surrogate model.")
+            
+            # Load evaluation history
+            if history_exists:
+                with open(HISTORY_PATH, 'rb') as f:
+                    history_data = pickle.load(f)
+                    self.configs_evaluated = history_data['configs_evaluated']
+                    self.scores_evaluated = history_data['scores_evaluated']
+                    self.best_config = history_data['best_config']
+                    self.best_score = history_data['best_score']
+                print(f"Loaded evaluation history. {len(self.configs_evaluated)} configurations found.")
+            
+            # Load best configs history
+            if best_configs_exists:
+                with open(BEST_CONFIG_PATH, 'r') as f:
+                    self.best_configs_history = json.load(f)
+                print(f"Loaded {len(self.best_configs_history)} best configurations.")
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error loading data: {e}")
+            print("Starting fresh.")
+            return False
 
     def initial_sampling(self, n_samples=10):
         """Initial sampling using Latin Hypercube Sampling (LHS) for better space coverage"""
         print(f"Performing Latin Hypercube initial sampling with {n_samples} configurations...")
+        
+        # If we already have data, reduce the number of initial samples
+        if len(self.configs_evaluated) > 0:
+            original_n = n_samples
+            n_samples = max(5, n_samples // 2)  # Reduce but ensure at least 5
+            print(f"Using reduced sample size ({n_samples} instead of {original_n}) due to existing data.")
         
         # Zero configuration (baseline)
         zero_config = {h: 0.1 for h in MODIFIABLE_HEATERS}
@@ -508,9 +610,9 @@ class DecoderOptimizer:
         for candidate in final_candidates:
             self.evaluate_configuration(candidate)
     
-    def adaptive_grid_search(self, n_iterations=5):
-        """Perform adaptive grid search over promising dimensions"""
-        print("\nPerforming adaptive grid search...")
+    def adaptive_grid_search(self, n_iterations=3, feature_count=3, grid_points=5):
+        """Perform faster adaptive grid search over promising dimensions"""
+        print("\nPerforming faster adaptive grid search...")
         
         if not self.best_config:
             print("No best configuration available yet.")
@@ -522,15 +624,36 @@ class DecoderOptimizer:
         important_features = None
         if hasattr(self, 'model') and self.model is not None:
             importances = self.model.feature_importances_
-            # Get indices of top 5 most important features
-            important_indices = np.argsort(importances)[::-1][:5]
+            # Get indices of top N most important features (reduced from 5)
+            important_indices = np.argsort(importances)[::-1][:feature_count]
             important_features = [MODIFIABLE_HEATERS[i] for i in important_indices]
             print(f"Most important heaters: {important_features}")
         else:
-            # If no model, choose 5 random heaters
-            important_features = random.sample(MODIFIABLE_HEATERS, 5)
+            # If no model, choose fewer random heaters
+            important_features = random.sample(MODIFIABLE_HEATERS, feature_count)
         
-        # Grid search over important features
+        # Create a smaller, more targeted grid
+        def create_targeted_grid(current_value, min_val=0.1, max_val=4.9, n_points=grid_points):
+            """Create a small grid centered around the current value"""
+            # Make sure current value is in the grid
+            grid = [current_value]
+            
+            # Determine step size to create n_points total
+            range_size = max_val - min_val
+            step = range_size / (n_points - 1)
+            
+            # Calculate potential grid points
+            potential_points = [min_val + i * step for i in range(n_points)]
+            
+            # Add points not already in the grid
+            for point in potential_points:
+                rounded_point = round(point, 1)  # Round to match VOLTAGE_OPTIONS precision
+                if rounded_point != current_value and rounded_point >= min_val and rounded_point <= max_val:
+                    grid.append(rounded_point)
+            
+            return grid
+        
+        # Grid search over important features (reduced iterations)
         for iteration in range(n_iterations):
             print(f"Grid search iteration {iteration+1}/{n_iterations}")
             
@@ -539,30 +662,46 @@ class DecoderOptimizer:
                 if hasattr(self, 'model') and self.model is not None:
                     self.train_surrogate_model()
                     importances = self.model.feature_importances_
-                    important_indices = np.argsort(importances)[::-1][:5]
+                    important_indices = np.argsort(importances)[::-1][:feature_count]
                     important_features = [MODIFIABLE_HEATERS[i] for i in important_indices]
                     print(f"Updated important heaters: {important_features}")
             
-            # For each important feature, try different values
+            # For each important feature, try a smaller set of values
             for feature in important_features:
                 current_value = base_config[feature]
                 best_value = current_value
                 best_score = float('-inf')
                 
-                # Try different values
-                for value in [v for v in VOLTAGE_OPTIONS_GRID if v != current_value]:
+                # Get targeted grid values instead of using all VOLTAGE_OPTIONS_GRID
+                test_values = create_targeted_grid(current_value)
+                print(f"  Testing heater {feature} with values: {test_values}")
+                
+                # Try each value in our smaller grid
+                for value in test_values:
+                    if value == current_value:
+                        continue
+                        
                     test_config = base_config.copy()
                     test_config[feature] = value
+                    
+                    # If we have a model, pre-screen with the model first
+                    if hasattr(self, 'model') and self.model is not None:
+                        predicted_score = self.predict_score(test_config)
+                        if predicted_score < best_score:
+                            print(f"    Skipping value {value}V (predicted score: {predicted_score:.2f})")
+                            continue
                     
                     score, _ = self.evaluate_configuration(test_config)
                     
                     if score > best_score:
                         best_score = score
                         best_value = value
+                        print(f"    New best value: {best_value}V (score: {best_score:.2f})")
                 
                 # Update base config with best value
                 base_config[feature] = best_value
-        
+
+        return base_config
     def differential_evolution_step(self):
         """Run differential evolution on promising regions"""
         print("\nRunning differential evolution optimization...")
@@ -591,7 +730,7 @@ class DecoderOptimizer:
             objective,
             bounds,
             popsize=20,
-            maxiter=20,
+            maxiter=15,
             mutation=(0.5, 1.0),
             recombination=0.7,
             strategy='rand1bin',
@@ -660,34 +799,61 @@ class DecoderOptimizer:
         
         return current_config, current_score
     
-    def optimize(self):
+    def optimize(self, full_optimization=True, initial_samples=20):
         """Run multi-stage optimization for decoder"""
         print("Starting decoder optimization...")
+            
+        # Determine optimization approach based on existing data
+        existing_data = len(self.configs_evaluated) > 0
         
-        # Phase 1: Initial exploration
-        self.initial_sampling(n_samples=400)
-        
-        
-        # Phase 2: Train initial surrogate model
-        self.train_surrogate_model()
-        
-        # Phase 3: Evolutionary optimization
-        self.evolution_step(population_size=8, generations=3)
-        
-        # Phase 4: Retrain surrogate model  
-        self.train_surrogate_model()
-        
-        # Phase 5: Adaptive grid search
-        self.adaptive_grid_search(n_iterations=3)
-        
-        # Phase 6: Differential evolution
-        self.differential_evolution_step()
-        
-        # Phase 7: Final local search
-        final_config, final_score = self.local_search(iterations=10)
+        # If we have existing data and don't want full optimization
+        if existing_data and not full_optimization:
+            print(f"Building on {len(self.configs_evaluated)} existing evaluations.")
+            
+            # Train model on existing data
+            self.train_surrogate_model()
+            
+            # Run evolution with existing model
+            self.evolution_step(population_size=8, generations=3)
+            
+            # Update model
+            self.train_surrogate_model()
+            
+            # Local search for fine-tuning
+            final_config, final_score = self.local_search(iterations=10)
+            
+        else:
+            # Full optimization process
+            # Phase 1: Initial exploration (reduced samples if we have data)
+            sample_count = initial_samples
+            if existing_data:
+                sample_count = max(10, initial_samples)  # Reduce sampling when building on data
+                
+            self.initial_sampling(n_samples=sample_count)
+            
+            # Phase 2: Train initial surrogate model
+            self.train_surrogate_model()
+            
+            # Phase 3: Evolutionary optimization
+            self.evolution_step(population_size=8, generations=3)
+            
+            # Phase 4: Retrain surrogate model  
+            self.train_surrogate_model()
+            
+            # Phase 5: Adaptive grid search
+            # With this line for a faster search:
+            self.adaptive_grid_search(n_iterations=2, feature_count=3, grid_points=5)
+            # Phase 6: Differential evolution
+            self.differential_evolution_step()
+            
+            # Phase 7: Final local search
+            final_config, final_score = self.local_search(iterations=10)
         
         print("\nOptimization complete!")
         print(f"Best score: {final_score:.2f}")
+        
+        # Save final data
+        self.save_data()
         
         return final_config, final_score
     
@@ -740,6 +906,49 @@ class DecoderOptimizer:
         
         return all_correct
 
+    def list_saved_configurations(self):
+        """List all the best configurations that have been saved"""
+        if not os.path.isfile(BEST_CONFIG_PATH):
+            print("No saved configurations found.")
+            return []
+        
+        try:
+            with open(BEST_CONFIG_PATH, 'r') as f:
+                configs = json.load(f)
+            
+            print(f"\nFound {len(configs)} saved configurations:")
+            for i, config in enumerate(configs):
+                print(f"{i+1}. Time: {config['timestamp']}, Score: {config['score']:.2f}, "
+                     f"Success: {config.get('success_count', '?')}")
+            
+            return configs
+        except Exception as e:
+            print(f"Error loading configurations: {e}")
+            return []
+    
+    def load_specific_configuration(self, index):
+        """Load a specific saved configuration by index"""
+        configs = self.list_saved_configurations()
+        
+        if not configs:
+            return None
+        
+        if index < 1 or index > len(configs):
+            print(f"Invalid index. Please choose between 1 and {len(configs)}.")
+            return None
+        
+        selected_config = configs[index-1]
+        
+        # Convert string keys back to integers
+        config_dict = {}
+        for k, v in selected_config['config'].items():
+            config_dict[int(k)] = float(v)
+        
+        print(f"\nLoaded configuration from {selected_config['timestamp']}")
+        print(f"Score: {selected_config['score']:.2f}")
+        
+        return config_dict
+    
     def cleanup(self):
         """Close connections"""
         self.serial.close()
