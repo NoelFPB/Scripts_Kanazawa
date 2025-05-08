@@ -7,6 +7,10 @@ from scipy.optimize import differential_evolution
 import random
 from itertools import product
 
+
+
+# The initial sampling is different, it wont evaluate many configurations at first, but it will determine the promising regions and then evaluate.
+
 # Serial port configuration 
 SERIAL_PORT = 'COM4'
 BAUD_RATE = 115200

@@ -58,7 +58,7 @@ HISTORY_PATH = os.path.join(DATA_DIR, "evaluation_history.pkl")
 BEST_CONFIG_PATH = os.path.join(DATA_DIR, "best_configs.json")
 
 # Voltage options for discretization
-def create_voltage_options(start=0, end=4.9, step=0.1):
+def create_voltage_options(start=0, end=4.9, step=0.05):
     options = []
     current = start
     
@@ -76,7 +76,7 @@ def create_voltage_options(start=0, end=4.9, step=0.1):
 
 # Voltage options with different granularity
 VOLTAGE_OPTIONS = create_voltage_options()
-VOLTAGE_OPTIONS_GRID = create_voltage_options(start=0, end=4.9, step=0.5)
+VOLTAGE_OPTIONS_GRID = create_voltage_options(start=0, end=4.9, step=0.05)
 
 
 class DecoderOptimizer:
@@ -86,7 +86,7 @@ class DecoderOptimizer:
     """
     def __init__(self, load_previous=True):
         print("Initializing decoder optimization...")
-        
+        print(VOLTAGE_OPTIONS)
         # Create data directory if it doesn't exist
         os.makedirs(DATA_DIR, exist_ok=True)
         
@@ -420,7 +420,7 @@ class DecoderOptimizer:
         n_dim = len(MODIFIABLE_HEATERS)
         
         # Generate Latin Hypercube samples for better coverage of the search space
-        sampler = qmc.LatinHypercube(d=n_dim, seed=42)
+        sampler = qmc.LatinHypercube(d=n_dim, seed=2)
         samples = sampler.random(n=n_samples-1)  # -1 because we already did the zero config
         
         # Convert uniform samples [0,1] to voltage range
@@ -702,6 +702,7 @@ class DecoderOptimizer:
                 base_config[feature] = best_value
 
         return base_config
+    
     def differential_evolution_step(self):
         """Run differential evolution on promising regions"""
         print("\nRunning differential evolution optimization...")
@@ -799,7 +800,7 @@ class DecoderOptimizer:
         
         return current_config, current_score
     
-    def optimize(self, full_optimization=True, initial_samples=20):
+    def optimize(self, full_optimization=True, initial_samples=1000):
         """Run multi-stage optimization for decoder"""
         print("Starting decoder optimization...")
             
@@ -842,7 +843,7 @@ class DecoderOptimizer:
             
             # Phase 5: Adaptive grid search
             # With this line for a faster search:
-            self.adaptive_grid_search(n_iterations=2, feature_count=3, grid_points=5)
+            self.adaptive_grid_search(n_iterations=3, feature_count=5, grid_points=25)
             # Phase 6: Differential evolution
             self.differential_evolution_step()
             
