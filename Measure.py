@@ -3,6 +3,7 @@ import time
 import pyvisa
 import keyboard
 import os
+import numpy as np
 
 
 # USING as input 36 and 37
@@ -17,6 +18,14 @@ HEATER_COMBINATIONS = {
     '3': (4.9, 0.1),  # 10
     '4': (4.9, 4.9)   # 11
 }
+
+# Measurement parameters
+NUM_MEASUREMENTS = 5  # Number of measurements to average
+MEASUREMENT_DELAY = 0.1  # Delay between measurements in seconds
+
+# Channel selection - set to True for channels you want to measure
+# Channel indices: 0=CH1, 1=CH2, 2=CH3, 3=CH4
+CHANNELS_TO_MEASURE = [True, 0, 0, 0]  # By default, measure all channels
 
 def init_hardware():
     # Initialize oscilloscope
@@ -42,11 +51,36 @@ def init_hardware():
 
 def measure_outputs(scope):
     try:
-        output1 = round(float(scope.query(':MEASure:STATistic:ITEM? CURRent,VMAX,CHANnel1')), 5)
-        output2 = round(float(scope.query(':MEASure:STATistic:ITEM? CURRent,VMAX,CHANnel2')), 5)
-        output3 = round(float(scope.query(':MEASure:STATistic:ITEM? CURRent,VMAX,CHANnel3')), 5)
-        output4 = round(float(scope.query(':MEASure:STATistic:ITEM? CURRent,VMAX,CHANnel4')), 5)
-        return [output1, output2, output3, output4]
+        # Initialize arrays to store the measurements
+        measurements = [[] for _ in range(4)]
+        channel_names = ['CHANnel1', 'CHANnel2', 'CHANnel3', 'CHANnel4']
+        
+        # Take multiple measurements for each active channel
+        for i in range(NUM_MEASUREMENTS):
+            try:
+                # Measure each active channel
+                for ch_idx, is_active in enumerate(CHANNELS_TO_MEASURE):
+                    if is_active:
+                        value = float(scope.query(f':MEASure:STATistic:ITEM? CURRent,VMAX,{channel_names[ch_idx]}'))
+                        measurements[ch_idx].append(value)
+                
+                # Wait a bit between measurements to ensure independent readings
+                time.sleep(MEASUREMENT_DELAY)
+                
+            except Exception as e:
+                print(f"Error in measurement {i+1}: {e}")
+        
+        # Calculate averages and round to 5 decimal places
+        averages = [None] * 4  # Initialize with None values
+        for ch_idx, channel_data in enumerate(measurements):
+            if not CHANNELS_TO_MEASURE[ch_idx] or not channel_data:
+                continue  # Skip inactive channels
+                
+            # Calculate average and round to 5 decimal places
+            average = round(sum(channel_data) / len(channel_data), 5)
+            averages[ch_idx] = average
+        
+        return averages
     except Exception as e:
         print(f"Error measuring outputs: {e}")
         return [None, None, None, None]
@@ -78,6 +112,8 @@ def display_all_heaters(heater_values):
         print("  ".join(values))
     print("\n")
 
+# The configure_channels function is removed
+
 def main():
     try:
             initial_config ={0: 1.7, 1: 3.2, 2: 2.1, 3: 0.6, 4: 4.9, 5: 1.5, 6: 4.5, 7: 0.5, 8: 4.3, 9: 0.6, 10: 1.0, 11: 2.2, 12: 2.7, 13: 1.6, 14: 1.0, 15: 3.8, 16: 0.5, 17: 3.1, 18: 1.0, 19: 1.0, 20: 1.2, 21: 2.5, 22: 3.1, 23: 4.9, 24: 0.1, 25: 4.2, 26: 1.4, 27: 3.7, 28: 0.7, 29: 2.5, 30: 3.5, 31: 1.2, 32: 2.6, 33: 0.01, 34: 0.01, 35: 0.01, 36: 0.0, 37: 0.0, 38: 0.01, 39: 0.01} 
@@ -106,27 +142,30 @@ def main():
                     print_help()
                     display_all_heaters(heater_values)
                     time.sleep(0.2)
+
                 elif keyboard.is_pressed('q'):
                     break
                     
                 if value_changed:
                     send_heater_values(ser, heater_values)
                     time.sleep(0.2)
+                    
+                    # Show status message
+                    print("\nMeasuring outputs (5 samples)...")
+                    
+                    # Perform multiple measurements and get the average
                     outputs = measure_outputs(scope)
                     
                     # Log the change
-                    
-                    #clear_screen()
-                    #print_help()
                     print(f"\nChanged inputs:")
                     print(f"Input A (H36): {prev_value_36:.2f}V -> {heater_values[36]:.2f}V")
                     print(f"Input B (H37): {prev_value_37:.2f}V -> {heater_values[37]:.2f}V")
                     
-                    print(f"\nCurrent outputs:")
-                    print(f"O1: {outputs[0]}V")
-                    print(f"O2: {outputs[1]}V")
-                    print(f"O3: {outputs[2]}V")
-                    print(f"O4: {outputs[3]}V")
+                    print(f"\nAverage outputs (from {NUM_MEASUREMENTS} measurements):")
+                    # Only show active channels
+                    for ch_idx, is_active in enumerate(CHANNELS_TO_MEASURE):
+                        if is_active and outputs[ch_idx] is not None:
+                            print(f"O{ch_idx+1}: {outputs[ch_idx]}V")
                     
                     prev_value_36 = heater_values[36]
                     prev_value_37 = heater_values[37]

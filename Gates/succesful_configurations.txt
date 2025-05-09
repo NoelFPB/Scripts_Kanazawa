@@ -13,6 +13,10 @@ After changing power source
 1.59
 1.75
 4.79
+
+
+apparently everything stopped working after changing the frequency
+
 ------------------------------------------------------------------------------------------------------
 
 OR gate:

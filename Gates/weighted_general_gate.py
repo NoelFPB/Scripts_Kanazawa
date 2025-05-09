@@ -719,7 +719,7 @@ class LogicGateOptimizer:
         print(f"Starting {self.gate_type} gate optimization...")
         
         # Phase 1: Initial exploration
-        self.initial_sampling(n_samples=300)
+        self.initial_sampling(n_samples=100)
         
         # Phase 2: Train initial surrogate model
         self.train_surrogate_model()
