@@ -13,7 +13,7 @@ BAUD_RATE = 115200
 
 # === GATE CONFIGURATION - MODIFY THIS SECTION ===
 # Logic gate type to optimize (AND, OR, NAND, NOR, XOR, XNOR, or CUSTOM)
-GATE_TYPE = "AND"
+GATE_TYPE = "OR"
 
 # Input heaters for logic gate
 INPUT_HEATERS = [36, 37]  # Our gate inputs
@@ -38,8 +38,8 @@ HIGH_VOLTAGE = 4.9   # Voltage representing logical HIGH
 LOW_THRESHOLD = 1.4  # Outputs below this are considered LOW
 OPTIMAL_LOW = 1
 
-HIGH_THRESHOLD = 3.8 # Outputs above this start to be considered HIGH
-OPTIMAL_HIGH = 4   # Optimal HIGH output
+HIGH_THRESHOLD = 4 # Outputs above this start to be considered HIGH
+OPTIMAL_HIGH = 4.5   # Optimal HIGH output
 
 
 # Heater configuration
@@ -209,10 +209,10 @@ class LogicGateOptimizer:
         
         # Component weights (sum to 1.0)
         WEIGHTS = {
-            'high_state': 0.2,      # HIGH output performance
-            'low_state': 0.2,       # LOW output performance
-            'high_consistency': 0.2, # Consistency of HIGH outputs
-            'low_consistency': 0.2,  # Consistency of LOW outputs
+            'high_state': 0.15,      # HIGH output performance
+            'low_state': 0.15,       # LOW output performance
+            'high_consistency': 0.5, # Consistency of HIGH outputs
+            'low_consistency': 0,  # Consistency of LOW outputs
             'separation': 0.20       # Separation between HIGH/LOW
         }
         
@@ -719,7 +719,7 @@ class LogicGateOptimizer:
         print(f"Starting {self.gate_type} gate optimization...")
         
         # Phase 1: Initial exploration
-        self.initial_sampling(n_samples=100)
+        self.initial_sampling(n_samples=300)
         
         # Phase 2: Train initial surrogate model
         self.train_surrogate_model()
