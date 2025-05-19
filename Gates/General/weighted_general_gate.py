@@ -35,7 +35,7 @@ LOW_VOLTAGE = 0.1    # Voltage representing logical LOW
 HIGH_VOLTAGE = 4.9   # Voltage representing logical HIGH
 
 # Output voltage thresholds
-LOW_THRESHOLD = 1.4  # Outputs below this are considered LOW
+LOW_THRESHOLD = 1.5  # Outputs below this are considered LOW
 OPTIMAL_LOW = 1
 
 HIGH_THRESHOLD = 4 # Outputs above this start to be considered HIGH
@@ -209,11 +209,11 @@ class LogicGateOptimizer:
         
         # Component weights (sum to 1.0)
         WEIGHTS = {
-            'high_state': 0.15,      # HIGH output performance
-            'low_state': 0.15,       # LOW output performance
-            'high_consistency': 0.5, # Consistency of HIGH outputs
-            'low_consistency': 0,  # Consistency of LOW outputs
-            'separation': 0.20       # Separation between HIGH/LOW
+            'high_state': 0.2,      # HIGH output performance
+            'low_state': 0.3,       # LOW output performance
+            'high_consistency': 0.2, # Consistency of HIGH outputs
+            'low_consistency': 0.1,  # Consistency of LOW outputs
+            'separation': 0.2       # Separation between HIGH/LOW
         }
         
         # Initialize scores
@@ -719,7 +719,7 @@ class LogicGateOptimizer:
         print(f"Starting {self.gate_type} gate optimization...")
         
         # Phase 1: Initial exploration
-        self.initial_sampling(n_samples=300)
+        self.initial_sampling(n_samples=100)
         
         # Phase 2: Train initial surrogate model
         self.train_surrogate_model()
