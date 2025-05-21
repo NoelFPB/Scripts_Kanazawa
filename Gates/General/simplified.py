@@ -11,7 +11,7 @@ SERIAL_PORT = 'COM4'
 BAUD_RATE = 115200
 
 # === GATE CONFIGURATION ===
-GATE_TYPE = "NAND"  # Logic gate type to optimize (AND, OR, NAND, NOR, XOR, XNOR)
+GATE_TYPE = "NOR"  # Logic gate type to optimize (AND, OR, NAND, NOR, XOR, XNOR)
 INPUT_HEATERS = [36, 37]  # Heaters for input A and B
 
 # Voltage definitions
@@ -127,9 +127,9 @@ class SPSALogicGateOptimizer:
         # Component weights (sum to 1.0)
         WEIGHTS = {
             'high_state': 0.2,      # HIGH output performance
-            'low_state': 0.25,       # LOW output performance
-            'high_consistency': 0.35, # Consistency of HIGH outputs
-            'low_consistency': 0,  # Consistency of LOW outputs
+            'low_state': 0.2,       # LOW output performance
+            'high_consistency': 0.0, # Consistency of HIGH outputs
+            'low_consistency': 0.4,  # Consistency of LOW outputs
             'separation': 0.2       # Separation between HIGH/LOW
         }
         
@@ -222,28 +222,7 @@ class SPSALogicGateOptimizer:
         # Add success bonus for completely correct configurations
         # Removing the bonus because I think it destroys the shape sometimes.
         # if success_count == len(INPUT_COMBINATIONS):
-        #     final_score += 20  # Bonus for perfect behavior
-        
-
-        # Update best if improved
-        if final_score > self.best_score:
-            self.best_score = final_score
-            self.best_config = config.copy()
-            print(f"\nNew best score: {final_score:.2f}")
-            print(f"Components: HIGH={component_scores['high_state']:.2f}, " 
-                f"LOW={component_scores['low_state']:.2f}, "
-                f"HIGH_CONS={component_scores['high_consistency']:.2f}, "
-                f"LOW_CONS={component_scores['low_consistency']:.2f}, "
-                f"SEP={component_scores['separation']:.2f}")
-            print(f"Success count: {success_count}/{len(INPUT_COMBINATIONS)}")
-            
-            if high_outputs:
-                print(f"HIGH outputs: avg={sum(high_outputs)/len(high_outputs):.2f}V, " 
-                    f"min={min(high_outputs):.2f}V, max={max(high_outputs):.2f}V")
-            if low_outputs:
-                print(f"LOW outputs: avg={sum(low_outputs)/len(low_outputs):.2f}V, "
-                    f"min={min(low_outputs):.2f}V, max={max(low_outputs):.2f}V\n")
-        
+        #     final_score += 20  # Bonus for perfect behavior  
         return final_score
     
     def initial_sampling(self, n_samples=20):
@@ -259,6 +238,11 @@ class SPSALogicGateOptimizer:
         score = self.evaluate_configuration(zero_config)
         print(f"Zero configuration: Score = {score:.2f}")
         
+        if score > self.best_score:
+            self.best_score = score
+            self.best_config = zero_config.copy()
+            print(f"\nNew best score: {score:.2f}")
+
         # Setup for Latin Hypercube Sampling
         n_dims = len(MODIFIABLE_HEATERS)
         sampler = qmc.LatinHypercube(d=n_dims, seed=42)
@@ -302,23 +286,29 @@ class SPSALogicGateOptimizer:
             
             # Evaluate configuration
             score = self.evaluate_configuration(config)
+
+            if score > self.best_score:
+                self.best_score = score
+                self.best_config = config.copy()
+                print(f"\nNew best score: {score:.2f}")
+
             print(f"LHS configuration {i+1}/{n_samples-1}: Score = {score:.2f}")
         
         # Add some fully random configurations for exploration diversity
-        n_random = max(0, n_samples // 5)  # 20% random samples
+        # n_random = max(0, n_samples // 5)  # 20% random samples
         
-        print(f"Adding {n_random} purely random configurations for diversity...")
-        for i in range(n_random):
-            config = {h: random.choice(VOLTAGE_OPTIONS) for h in MODIFIABLE_HEATERS}
-            for h in FIXED_FIRST_LAYER:
-                if h not in INPUT_HEATERS:
-                    config[h] = 0.01
+        # print(f"Adding {n_random} purely random configurations for diversity...")
+        # for i in range(n_random):
+        #     config = {h: random.choice(VOLTAGE_OPTIONS) for h in MODIFIABLE_HEATERS}
+        #     for h in FIXED_FIRST_LAYER:
+        #         if h not in INPUT_HEATERS:
+        #             config[h] = 0.01
             
-            config_tuple = tuple((h, config.get(h, 0.1)) for h in sorted(MODIFIABLE_HEATERS))
-            if config_tuple not in tried_configs:
-                tried_configs.add(config_tuple)
-                score = self.evaluate_configuration(config)
-                print(f"Random configuration {i+1}/{n_random}: Score = {score:.2f}")
+        #     config_tuple = tuple((h, config.get(h, 0.1)) for h in sorted(MODIFIABLE_HEATERS))
+        #     if config_tuple not in tried_configs:
+        #         tried_configs.add(config_tuple)
+        #         score = self.evaluate_configuration(config)
+        #         print(f"Random configuration {i+1}/{n_random}: Score = {score:.2f}")
         
         # Explore more around best configuration found so far
         if self.best_config:
@@ -355,6 +345,12 @@ class SPSALogicGateOptimizer:
             
             # Evaluate
             score = self.evaluate_configuration(new_config)
+
+            if score > self.best_score:
+                self.best_score = score
+                self.best_config = new_config.copy()
+                print(f"\nNew best config {score:.2f}")
+             
             print(f"Local exploration {i+1}/{n_samples}: Score = {score:.2f}")
     
     def spsa_optimize(self, iterations=50, a=1.0, c=0.1, alpha=0.35, gamma=0.101):
@@ -381,8 +377,6 @@ class SPSALogicGateOptimizer:
         heater_keys = sorted(MODIFIABLE_HEATERS)
         
         iterations_without_improvement = 0
-        effective_k = 1  # Use separate counter for step size calculations
-
         # Discretize function to map continuous SPSA values to allowed voltages
         def discretize(values):
             return {h: min(VOLTAGE_OPTIONS, key=lambda x: abs(x - values[h])) for h in values}
@@ -390,10 +384,8 @@ class SPSALogicGateOptimizer:
         # Run SPSA iterations
         for k in range(1, iterations + 1):
             # Update step size and perturbation using effective_k
-            ak = a / (effective_k ** alpha)
-            ck = c / (effective_k ** gamma)
-
-            print(f'Iteration: {k} (Effective: {effective_k}) Step size {ak:.2f} Perturbation size {ck:.2f}')
+            ak = a / ( k ** alpha)
+            ck = c / ( k ** gamma)
 
             # Generate random perturbation vector (±1 for each dimension)
             delta = {h: 1 if random.random() > 0.5 else -1 for h in heater_keys}
@@ -415,7 +407,7 @@ class SPSALogicGateOptimizer:
             # Evaluate both configurations
             y_plus = self.evaluate_configuration(theta_plus_disc)
             y_minus = self.evaluate_configuration(theta_minus_disc)
-            
+
             # Estimate gradient
             g_hat = {h: (y_plus - y_minus) / (2 * ck * delta[h]) for h in heater_keys}
             
@@ -437,16 +429,20 @@ class SPSALogicGateOptimizer:
             # Evaluate new configuration
             score = self.evaluate_configuration(theta_new_disc)
 
+
             # Update based on performance
             if score > self.best_score:
                 # If better than global best, continue from new point
+                self.best_score = score
+                self.best_config = theta_new_disc.copy()
+                print(f'New best score: {score:.2f}')
                 theta = theta_new.copy()
                 iterations_without_improvement = 0
             else:
                 iterations_without_improvement += 1
 
-                if iterations_without_improvement >= 3:
-                    print(f'No improvement for {iterations_without_improvement} iterations. Restarting from best')
+                if iterations_without_improvement >= 5:
+                    print(f'\nNo improvement for {iterations_without_improvement} iterations. Restarting from best\n')
                     # Reset to best configuration
                     theta = {h: self.best_config.get(h, 0.1) for h in MODIFIABLE_HEATERS}
                     # Reset effective iteration counter to get larger steps
@@ -456,10 +452,9 @@ class SPSALogicGateOptimizer:
                     # Otherwise continue from new point
                     theta = theta_new.copy()
             
-            # Always increment effective counter
-            effective_k += 1
-            
-            print(f'Score: {score:.2f} (Best: {self.best_score:.2f})')
+            print(f'Iteration: {k} Step size {ak:.2f} Perturbation size {ck:.2f} Best {self.best_score:.2f} Score {score:.2f}')
+
+            #print(f'Score: {score:.2f} (Best: {self.best_score:.2f})')
 
     def test_final_configuration(self):
         """Test and print performance of the optimized configuration"""
@@ -537,20 +532,20 @@ class SPSALogicGateOptimizer:
         
         # 1 
         print(f"Starting {self.gate_type} gate optimization...")
-        self.initial_sampling(n_samples=1) # Latin Hypercube Sampling
+        self.initial_sampling(n_samples=10) # Latin Hypercube Sampling
 
         # 2
         # a step size, c perturbation size (how far to perturb for gradient estimation)
         # alpha step size decay parameter, gamma perturbation size decay parameter
         print("\nRunning SPSA with larger step size for exploration...\n")
-        self.spsa_optimize(iterations=50, a=1, c=0.5, alpha=0.2, gamma=0.101) 
+        self.spsa_optimize(iterations=40, a=2, c=1.5, alpha=0.2, gamma=0.101) 
 
         # 3
-        #self.explore_around_best(n_samples=10)
+        self.explore_around_best(n_samples=10)
         
         # 4
-        # print("\nRefining...\n")
-        # self.spsa_optimize(iterations=10, a=0.5, c=0.5, alpha=0.1, gamma=0.1)
+        print("\nRefining...\n")
+        self.spsa_optimize(iterations=10, a=0.5, c=0.5, alpha=0.1, gamma=0.1)
         
         # # 5
         # self.explore_around_best(n_samples=10)
