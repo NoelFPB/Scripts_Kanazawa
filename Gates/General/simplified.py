@@ -11,7 +11,7 @@ SERIAL_PORT = 'COM4'
 BAUD_RATE = 115200
 
 # === GATE CONFIGURATION ===
-GATE_TYPE = "NOR"  # Logic gate type to optimize (AND, OR, NAND, NOR, XOR, XNOR)
+GATE_TYPE = "XNOR"  # Logic gate type to optimize (AND, OR, NAND, NOR, XOR, XNOR)
 INPUT_HEATERS = [36, 37]  # Heaters for input A and B
 
 # Voltage definitions
@@ -128,8 +128,8 @@ class SPSALogicGateOptimizer:
         WEIGHTS = {
             'high_state': 0.2,      # HIGH output performance
             'low_state': 0.2,       # LOW output performance
-            'high_consistency': 0.0, # Consistency of HIGH outputs
-            'low_consistency': 0.4,  # Consistency of LOW outputs
+            'high_consistency': 0.2, # Consistency of HIGH outputs
+            'low_consistency': 0.2,  # Consistency of LOW outputs
             'separation': 0.2       # Separation between HIGH/LOW
         }
         
@@ -311,9 +311,9 @@ class SPSALogicGateOptimizer:
         #         print(f"Random configuration {i+1}/{n_random}: Score = {score:.2f}")
         
         # Explore more around best configuration found so far
-        if self.best_config:
-            print("Exploring around best configuration found...")
-            self.explore_around_best(n_samples=max(3, n_samples//10))
+        # if self.best_config:
+        #     print("Exploring around best configuration found...")
+        #     self.explore_around_best(n_samples=max(3, n_samples//10))
     
     def explore_around_best(self, n_samples=5):
         """Explore the space around the best configuration found so far"""
@@ -441,7 +441,7 @@ class SPSALogicGateOptimizer:
             else:
                 iterations_without_improvement += 1
 
-                if iterations_without_improvement >= 5:
+                if iterations_without_improvement >= 10:
                     print(f'\nNo improvement for {iterations_without_improvement} iterations. Restarting from best\n')
                     # Reset to best configuration
                     theta = {h: self.best_config.get(h, 0.1) for h in MODIFIABLE_HEATERS}
@@ -529,36 +529,21 @@ class SPSALogicGateOptimizer:
     
     def optimize(self):
         """Run multi-stage optimization for logic gate"""
-        
-        # 1 
+
+
         print(f"Starting {self.gate_type} gate optimization...")
-        self.initial_sampling(n_samples=10) # Latin Hypercube Sampling
 
-        # 2
-        # a step size, c perturbation size (how far to perturb for gradient estimation)
-        # alpha step size decay parameter, gamma perturbation size decay parameter
-        print("\nRunning SPSA with larger step size for exploration...\n")
-        self.spsa_optimize(iterations=40, a=2, c=1.5, alpha=0.2, gamma=0.101) 
+        self.initial_sampling(n_samples=500) # Latin Hypercube Sampling
+        self.explore_around_best(n_samples=15)
 
-        # 3
-        self.explore_around_best(n_samples=10)
-        
-        # 4
-        print("\nRefining...\n")
-        self.spsa_optimize(iterations=10, a=0.5, c=0.5, alpha=0.1, gamma=0.1)
-        
-        # # 5
-        # self.explore_around_best(n_samples=10)
-        
-        # # 6
-        # print("\nFinal fine-tuning...\n")
-        # self.spsa_optimize(iterations=10, a=0.4, c=0.5)
-        
-        # # 7
-        # print("\nFinal exploration around best configuration...\n")
-        # self.explore_around_best(n_samples=10)
-        
-        
+        self.spsa_optimize(iterations=200, a=1, c=1, alpha=0.2, gamma=0.15) # a step size, c perturbation size (how far to perturb for gradient estimation)
+                                                                            # alpha step size decay parameter, gamma perturbation size decay parameters
+        self.explore_around_best(n_samples=15)
+
+        self.spsa_optimize(iterations=100, a=2, c=1, alpha=0.601, gamma=0.101) 
+
+        self.explore_around_best(n_samples=15)
+    
         # Test and print final results
         self.test_final_configuration()
         
