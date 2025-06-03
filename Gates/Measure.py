@@ -20,12 +20,12 @@ HEATER_COMBINATIONS = {
 }
 
 # Measurement parameters
-NUM_MEASUREMENTS = 5  # Number of measurements to average
+NUM_MEASUREMENTS = 10  # Number of measurements to average
 MEASUREMENT_DELAY = 0.1  # Delay between measurements in seconds
 
 # Channel selection - set to True for channels you want to measure
 # Channel indices: 0=CH1, 1=CH2, 2=CH3, 3=CH4
-CHANNELS_TO_MEASURE = [True, 0, 0, 0]  # By default, measure all channels
+CHANNELS_TO_MEASURE = [0, True, 0, 0]  # By default, measure all channels
 
 def init_hardware():
     # Initialize oscilloscope
@@ -116,7 +116,7 @@ def display_all_heaters(heater_values):
 
 def main():
     try:
-            initial_config ={0: 0.72, 1: 0.1, 2: 0.1, 3: 4.99, 4: 4.99, 5: 4.38, 6: 4.99, 7: 0.1, 8: 4.99, 9: 4.99, 10: 0.1, 11: 0.1, 12: 0.72, 13: 4.99, 14: 0.72, 15: 0.97, 16: 4.99, 17: 1.0, 18: 0.97, 19: 0.96, 20: 0.1, 21: 0.75, 22: 4.99, 23: 0.72, 24: 4.99, 25: 0.1, 26: 0.1, 27: 4.39, 28: 4.37, 29: 4.99, 30: 0.1, 31: 4.12, 32: 0.71, 33: 0.01, 34: 0.01, 35: 0.01, 36: 0.0, 37: 0.0, 38: 0.01, 39: 0.01}
+            initial_config = {0: 4.64, 1: 4.62, 2: 2.86, 3: 2.47, 4: 4.49, 5: 4.7, 6: 2.56, 7: 3.66, 8: 1.43, 9: 4.39, 10: 3.65, 11: 3.9, 12: 3.01, 13: 4.7, 14: 3.82, 15: 0.77, 16: 0.58, 17: 0.69, 18: 2.79, 19: 2.78, 20: 3.59, 21: 3.2, 22: 2.27, 23: 3.13, 24: 3.04, 25: 2.2, 26: 3.46, 27: 4.41, 28: 4.8, 29: 2.31, 30: 1.28, 31: 2.42, 32: 4.9, 33: 0.01, 34: 0.01, 35: 0.01, 36: 0.0, 37: 0.0, 38: 0.01, 39: 0.01}
             heater_values = {int(k): float(v) for k, v in initial_config.items()}
             scope, ser = init_hardware()
 
@@ -148,10 +148,6 @@ def main():
                 if value_changed:
                     send_heater_values(ser, heater_values)
                     time.sleep(0.2)
-                    
-                    # Show status message
-                    print("\nMeasuring outputs (5 samples)...")
-                    
                     # Perform multiple measurements and get the average
                     outputs = measure_outputs(scope)
                     

@@ -3,69 +3,44 @@ import time
 import pyvisa
 import numpy as np
 import random
-from scipy.stats import qmc  # For Latin Hypercube Sampling
-
+from scipy.stats import qmc
 
 # Serial port configuration 
 SERIAL_PORT = 'COM4'
 BAUD_RATE = 115200
 
-# === GATE CONFIGURATION ===
-GATE_TYPE = "XNOR"  # Logic gate type to optimize (AND, OR, NAND, NOR, XOR, XNOR)
-INPUT_HEATERS = [36, 37]  # Heaters for input A and B
+# === DECODER CONFIGURATION ===
+INPUT_PINS = [36, 37]  # Input pins (A, B)
 
 # Voltage definitions
 V_MIN = 0.1     # Representing logical LOW
 V_MAX = 4.9    # Representing logical HIGH
+LOW_THRESHOLD = 2   # Outputs below this are considered LOW (only for input determination)
+HIGH_THRESHOLD = 3.5  # Outputs above this are considered HIGH (only for final testing)
 
 # Heater configuration
 FIXED_FIRST_LAYER = list(range(33, 40))
-MODIFIABLE_HEATERS = [i for i in range(33) if i not in INPUT_HEATERS]
+MODIFIABLE_HEATERS = [i for i in range(33) if i not in INPUT_PINS]
 
-# Input combinations for testing
-INPUT_COMBINATIONS = [
-    (V_MIN, V_MIN),
-    (V_MIN, V_MAX),
-    (V_MAX, V_MIN),
-    (V_MAX, V_MAX)
+# Test configurations for decoder
+TEST_CONFIGURATIONS = [
+    (V_MIN, V_MIN),    # Input 00 (output 0 should be high, others low)
+    (V_MIN, V_MAX),   # Input 01 (output 1 should be high, others low)
+    (V_MAX, V_MIN),   # Input 10 (output 2 should be high, others low)
+    (V_MAX, V_MAX)   # Input 11 (output 3 should be high, others low)
 ]
 
-# Generate truth table based on gate type
-def generate_truth_table(gate_type):
-    truth_table = {}
-    if gate_type == "AND":
-        outputs = [False, False, False, True]
-    elif gate_type == "OR":
-        outputs = [False, True, True, True]
-    elif gate_type == "NAND":
-        outputs = [True, True, True, False]
-    elif gate_type == "NOR":
-        outputs = [True, False, False, False]
-    elif gate_type == "XOR":
-        outputs = [False, True, True, False]
-    elif gate_type == "XNOR":
-        outputs = [True, False, False, True]
-    else:
-        raise ValueError(f"Unknown gate type: {gate_type}")
-    
-    for i, input_pair in enumerate(INPUT_COMBINATIONS):
-        truth_table[input_pair] = outputs[i]
-    
-    return truth_table
 
-class SPSALogicGateOptimizer:
+class SPSADecoderOptimizer:
     """
-    Optimize a physical logic gate using Simultaneous Perturbation Stochastic Approximation (SPSA).
+    Optimize a physical decoder using Simultaneous Perturbation Stochastic Approximation (SPSA).
     """
-    def __init__(self, gate_type=GATE_TYPE):
-        # Initialize gate type and truth table
-        self.gate_type = gate_type
-        self.truth_table = generate_truth_table(gate_type)
+    def __init__(self):
+        print("Initializing decoder optimization...")
         
-        print(f"Optimizing {gate_type} gate with truth table:")
-        for inputs, output in self.truth_table.items():
-            print(f"  {inputs} -> {'HIGH' if output else 'LOW'}")
-        
+         # Add optimization phase tracking
+        self.optimization_phase = "exploration"  # Can be: "exploration", "spsa", "testing"
+
         # Initialize hardware connections
         self.scope = self._init_scope()
         self.serial = serial.Serial(SERIAL_PORT, BAUD_RATE)
@@ -79,27 +54,23 @@ class SPSALogicGateOptimizer:
     
         # Set fixed first layer values once and forget about them
         for h in FIXED_FIRST_LAYER:
-            if h not in INPUT_HEATERS:
+            if h not in INPUT_PINS:
                 self.base_config[h] = 0.01
-
         
     def _init_scope(self):
-        """Initialize oscilloscope for logic gate output measurement"""
+        """Initialize oscilloscope for decoder output measurement"""
         rm = pyvisa.ResourceManager()
         resources = rm.list_resources()
         if not resources:
             raise Exception("No VISA resources found")
         scope = rm.open_resource(resources[0])
         scope.timeout = 5000
-        
-        # Setup Channel 1 for logic gate output measurement
-        scope.write(':CHANnel2:DISPlay ON')
-        scope.write(':CHANnel2:SCALe 2')
-        scope.write(':CHANnel2:OFFSet -6')
-        
-        # Turn off other channels
-        # for channel_num in range(2, 5):
-        #     scope.write(f':CHANnel{channel_num}:DISPlay OFF')
+
+        # Setup all 4 channels for decoder output measurement
+        for channel_num in range(1, 5):
+            scope.write(f':CHANnel{channel_num}:DISPlay ON')
+            scope.write(f':CHANnel{channel_num}:SCALe 2')
+            scope.write(f':CHANnel{channel_num}:OFFSet -6')
             
         return scope
     
@@ -108,86 +79,119 @@ class SPSALogicGateOptimizer:
         voltage_message = "".join(f"{heater},{value};" for heater, value in config.items()) + '\n'
         self.serial.write(voltage_message.encode())
         self.serial.flush()
-        time.sleep(0.01)  # Small delay to ensure message is sent
+        time.sleep(0.01)
         self.serial.reset_input_buffer()
         self.serial.reset_output_buffer()
     
-    def measure_output(self):
-        """Measure the logic gate output voltage from oscilloscope"""
+    def measure_outputs(self):
+        """Measure all 4 decoder output voltages from oscilloscope"""
         try:
-            value = float(self.scope.query(':MEASure:STATistic:ITEM? CURRent,VMAX,CHANnel2'))
-            return round(value, 5)
+            outputs = []
+            for channel in range(1, 5):
+                value = float(self.scope.query(f':MEASure:STATistic:ITEM? CURRent,VMAX,CHANnel{channel}'))
+                outputs.append(round(value, 5))
+            return outputs
         except Exception as e:
             print(f"Measurement error: {e}")
-            return None
-            
+            return [None] * 4
+
     def evaluate_configuration(self, config):
-        """Evaluate configuration focusing purely on separation and consistency, independent of thresholds."""
+        """Evaluate decoder configuration focusing purely on separation and consistency, independent of thresholds."""
         
         # Component weights (sum to 1.0) - Only focus on what matters for separation
         WEIGHTS = {
             'high_consistency': 0.2,  # Consistency of HIGH outputs
-            'low_consistency': 0.1,   # Consistency of LOW outputs  
-            'separation': 0.6,         # Primary: separation between HIGH/LOW
+            'low_consistency': 0.2,   # Consistency of LOW outputs  
+            'separation': 0.5,         # Primary: separation between HIGH/LOW
             'success_bonus': 0.1       # Bonus for correct relative ordering
         }
         
         # Initialize scores
         component_scores = {k: 0.0 for k in WEIGHTS}
         
-        # Collect all outputs for analysis
-        high_outputs = []
-        low_outputs = []
+        # Collection of all high and low outputs for consistency calculation
+        all_high_outputs = []  # Active outputs (should be HIGH)
+        all_low_outputs = []   # Inactive outputs (should be LOW)
         
-        # Collect outputs for each input combination
-        for input_state in INPUT_COMBINATIONS:
+        # Test each input combination
+        for test_config in TEST_CONFIGURATIONS:
+            input_a, input_b = test_config
+            
+            # Determine expected active output (only use threshold for input determination)
+            expected_output_idx = (1 if input_b > LOW_THRESHOLD else 0) + 2 * (1 if input_a > LOW_THRESHOLD else 0)
+            
+            # Configure and measure
             current_config = config.copy()
-            current_config[INPUT_HEATERS[0]] = input_state[0]
-            current_config[INPUT_HEATERS[1]] = input_state[1]
-            
-            expected_high = self.truth_table[input_state]
-            
+            current_config[INPUT_PINS[0]] = input_a
+            current_config[INPUT_PINS[1]] = input_b
             self.send_heater_values(current_config)
             time.sleep(0.20)
             
-            output = self.measure_output()
-            if output is None:
+            outputs = self.measure_outputs()
+            if None in outputs:
                 return -1000
             
-            # Collect outputs based on expected state
-            if expected_high:
-                high_outputs.append(output)
-            else:
-                low_outputs.append(output)
+            # Get active and inactive outputs
+            active_output = outputs[expected_output_idx]
+            inactive_outputs = [out for i, out in enumerate(outputs) if i != expected_output_idx]
+            
+            # Collect outputs for consistency calculation
+            all_high_outputs.append(active_output)
+            all_low_outputs.extend(inactive_outputs)
         
         # If we have missing state combinations, penalize
-        if not high_outputs or not low_outputs:
+        if not all_high_outputs or not all_low_outputs:
             return -500
         
-        # 1. CONSISTENCY SCORES (unchanged - these are already threshold-independent)
-        if len(high_outputs) > 1:
-            avg_high = sum(high_outputs) / len(high_outputs)
-            high_variance = sum((o - avg_high)**2 for o in high_outputs) / len(high_outputs)
+        
+        # Normalize separation by the total voltage range actually used
+        all_outputs = all_high_outputs + all_low_outputs
+        voltage_range_used = max(all_outputs) - min(all_outputs)
+        
+        # 2. SEPARATION SCORE (completely threshold-independent)
+        high_avg = sum(all_high_outputs) / len(all_high_outputs)
+        low_avg = sum(all_low_outputs) / len(all_low_outputs)
+        separation = high_avg - low_avg
+
+        if separation <=0:
+            if self.optimization_phase == 'exploration':
+                return -100
+            elif self.optimization_phase == 'SPSA':
+                  if voltage_range_used > 0:
+                    # Smooth penalty that preserves gradient
+                    normalized_neg_separation = abs(separation) / voltage_range_used
+                    penalty_score = -20 - (normalized_neg_separation * 30)  # Range: -20 to -50
+                    
+                    # Add small consistency bonus to maintain some gradient variation
+                    if len(all_high_outputs) > 1:
+                        high_variance = sum((o - high_avg)**2 for o in all_high_outputs) / len(all_high_outputs)
+                        consistency_bonus = 10 / (1.0 + (high_variance / 0.25))
+                        penalty_score += consistency_bonus
+                    
+                    return penalty_score
+                  else:
+                      return -100
+                
+            else:
+                return -100
+            
+        #CONSISTENCY SCORES (threshold-independent)
+        if len(all_high_outputs) > 1:
+            high_avg = sum(all_high_outputs) / len(all_high_outputs)
+            high_variance = sum((o - high_avg)**2 for o in all_high_outputs) / len(all_high_outputs)
             component_scores['high_consistency'] = 1.0 / (1.0 + (high_variance / 0.25))
         else:
             component_scores['high_consistency'] = 1.0
         
-        if len(low_outputs) > 1:
-            avg_low = sum(low_outputs) / len(low_outputs)
-            low_variance = sum((o - avg_low)**2 for o in low_outputs) / len(low_outputs)
+        if len(all_low_outputs) > 1:
+            low_avg = sum(all_low_outputs) / len(all_low_outputs)
+            low_variance = sum((o - low_avg)**2 for o in all_low_outputs) / len(all_low_outputs)
             component_scores['low_consistency'] = 1.0 / (1.0 + (low_variance / 0.25))
         else:
             component_scores['low_consistency'] = 1.0
-        
-        # 2. SEPARATION SCORE (completely threshold-independent)
-        avg_high = sum(high_outputs) / len(high_outputs)
-        avg_low = sum(low_outputs) / len(low_outputs)
-        separation = avg_high - avg_low
-        
-        # Normalize separation by the total voltage range actually used
-        all_outputs = high_outputs + low_outputs
-        voltage_range_used = max(all_outputs) - min(all_outputs)
-        
+
+        # Separation score
+
         if voltage_range_used > 0:
             normalized_separation = abs(separation) / voltage_range_used
             component_scores['separation'] = min(1.0, normalized_separation * 2)  # Scale to make 50% range = 1.0
@@ -197,28 +201,29 @@ class SPSALogicGateOptimizer:
         # 3. SUCCESS BONUS (threshold-independent ranking)
         # Check if high outputs are generally higher than low outputs
         success_count = 0
-        for high_out in high_outputs:
-            for low_out in low_outputs:
+        for high_out in all_high_outputs:
+            for low_out in all_low_outputs:
                 if high_out > low_out:
                     success_count += 1
         
-        total_comparisons = len(high_outputs) * len(low_outputs)
+        total_comparisons = len(all_high_outputs) * len(all_low_outputs)
         success_rate = success_count / total_comparisons if total_comparisons > 0 else 0
         component_scores['success_bonus'] = success_rate
         
-        # Calculate final score (0-100)
         final_score = sum(component_scores[k] * WEIGHTS[k] * 100 for k in WEIGHTS)
         
         # Optional: Add debug info for best scores
         if final_score > self.best_score:
             print(f"  Separation: {separation:.3f}V, Range: {voltage_range_used:.3f}V")
-            print(f"  High avg: {avg_high:.3f}V, Low avg: {avg_low:.3f}V")
+            print(f"  High avg: {high_avg:.3f}V, Low avg: {low_avg:.3f}V")
             print(f"  Success rate: {success_rate:.2%}")
         
         return final_score
 
     def initial_sampling(self, n_samples=20):
         """Initial sampling using Latin Hypercube Sampling for better space coverage"""
+        
+        self.optimization_phase = 'exploration'
         print(f"Performing Latin Hypercube sampling with {n_samples} configurations...")
         
         # Zero configuration (baseline)
@@ -255,9 +260,10 @@ class SPSALogicGateOptimizer:
                 print(f"\nNew best score: {score:.2f}")
             
             print(f"LHS configuration {i+1}/{n_samples-1}: Score = {score:.2f}")
-
+            
     def explore_around_best(self, n_samples=5):
         """Local exploration around best configuration"""
+        self.optimization_phase = 'exploration'
         if not self.best_config:
             print("No best configuration available for local exploration.")
             return
@@ -284,15 +290,18 @@ class SPSALogicGateOptimizer:
                 self.best_config = new_config.copy()
                 print(f"\nNew best score: {score:.2f}")
             
-            print(f"Local exploration {i+1}/{n_samples}: Score = {score:.2f}") 
+            print(f"Local exploration {i+1}/{n_samples}: Score = {score:.2f}")
     
     def spsa_optimize(self, iterations=50, a=1.0, c=0.1, alpha=0.35, gamma=0.101):
         """
-        - a: Initial step size originally 0.602, modified becasue it was too fast
+        SPSA optimization for decoder
+        - a: Initial step size
         - c: Perturbation size
         - alpha: Step size decay parameter
         - gamma: Perturbation decay parameter
         """
+
+        self.optimization_phase = 'SPSA'
         # Use best configuration if available, otherwise initialize randomly
         if self.best_config:
             theta = {h: self.best_config.get(h, 0.1) for h in MODIFIABLE_HEATERS}
@@ -303,14 +312,12 @@ class SPSALogicGateOptimizer:
         heater_keys = sorted(MODIFIABLE_HEATERS)
         
         iterations_without_improvement = 0
-
+        
         # Run SPSA iterations
         for k in range(1, iterations + 1):
-            # Update step size and perturbation using effective_k
-            ak = a / ( k ** alpha)
-            # ck = c / ( k ** gamma)
-            #  Increasing minimum perturbation size
-            ck = max(0.2,  c / ( k ** gamma))
+            # Update step size and perturbation
+            ak = a / (k ** alpha)
+            ck = max(0.2, c / (k ** gamma))
 
             # Generate random perturbation vector (±1 for each dimension)
             delta = {h: 1 if random.random() > 0.5 else -1 for h in heater_keys}
@@ -346,12 +353,10 @@ class SPSALogicGateOptimizer:
             else:
                 iterations_without_improvement += 1
 
-                if iterations_without_improvement >= 25:
+                if iterations_without_improvement >= 50:
                     print(f'\nNo improvement for {iterations_without_improvement} iterations. Restarting from best\n')
                     # Reset to best configuration
                     theta = {h: self.best_config.get(h, 0.1) for h in MODIFIABLE_HEATERS}
-                    # Reset effective iteration counter to get larger steps
-                    #effective_k = max(1, effective_k // 2)
                     iterations_without_improvement = 0
                 else:
                     # Otherwise continue from new point
@@ -359,29 +364,52 @@ class SPSALogicGateOptimizer:
             
             print(f'Iteration: {k} Step size {ak:.2f} Perturbation size {ck:.2f} Best {self.best_score:.2f} Score {score:.2f}')
 
+
     def test_final_configuration(self):
+        """Display the final decoder configuration outputs"""
         if not self.best_config:
             print("No configuration available to test.")
             return False
-        
-        config = self.best_config
-        print(f"\nTesting final {self.gate_type} gate configuration:")
-
-        for input_state in INPUT_COMBINATIONS:
-            current_config = config.copy()
-            current_config[INPUT_HEATERS[0]] = input_state[0]
-            current_config[INPUT_HEATERS[1]] = input_state[1]
             
+        config = self.best_config
+        print(f"\nFinal decoder configuration outputs:")
+        
+        for test_idx, test_config in enumerate(TEST_CONFIGURATIONS):
+            input_a, input_b = test_config
+            
+            # Determine which output should be active based on input pattern (no thresholds)
+            # Pattern: 00->Ch1, 01->Ch2, 10->Ch3, 11->Ch4
+            input_pattern = f"{int(input_a == V_MAX)}{int(input_b == V_MAX)}"
+            expected_output_idx = test_idx  # Since TEST_CONFIGURATIONS is in order: 00, 01, 10, 11
+            
+            # Set up test configuration
+            current_config = config.copy()
+            current_config[INPUT_PINS[0]] = input_a
+            current_config[INPUT_PINS[1]] = input_b
+            
+            # Send configuration and measure
             self.send_heater_values(current_config)
-            time.sleep(0.25)
-            output_value = self.measure_output()
+            time.sleep(0.2)
+            outputs = self.measure_outputs()
+            
+            if None in outputs:
+                print(f"Measurement error in test case {test_idx + 1}")
+                continue
+            
+            # Display results
+            print(f"\nTest Case {test_idx + 1}:")
+            print(f"  Inputs (A, B): {input_a}V, {input_b}V")
+            print(f"  Input Pattern: {input_pattern}")
+            print(f"  Expected Active: Channel {expected_output_idx + 1}")
+            print(f"  Outputs:")
+            for i, out in enumerate(outputs):
+                marker = " ←" if i == expected_output_idx else ""
+                print(f"    Channel {i+1}: {out:.4f}V{marker}")
+        
+        return True
 
-            print(f"\nInputs (A, B): {input_state}")
-            print(f"{self.gate_type} Output: {output_value:.4f}V")
-
-        return None
-    
     def format_config(self):
+        """Format configuration for display"""
         if not self.best_config:
             return {}
         
@@ -391,36 +419,37 @@ class SPSALogicGateOptimizer:
         # Add values from best configuration
         for heater, value in self.best_config.items():
             complete_config[heater] = value
-
-        # Add fixed first layer values for completeness
+            
+        # Add fixed first layer values
         for h in FIXED_FIRST_LAYER:
-            if h not in INPUT_HEATERS:
+            if h not in INPUT_PINS:
                 complete_config[h] = 0.01
                 
         # Format all values to 2 decimal places
         return {k: round(float(v), 2) for k, v in complete_config.items()}
     
     def cleanup(self):
+        """Close connections"""
         self.serial.close()
         self.scope.close()
         print("Connections closed.")
     
     def optimize(self):
-        print(f"{self.gate_type} gate optimization...")
+        """Run multi-stage optimization for decoder"""
+        print("Starting decoder optimization...")
+        self.initial_sampling(n_samples=50)
 
-        self.initial_sampling(n_samples=75)
         self.explore_around_best(n_samples=10)
-         
         self.spsa_optimize(iterations=30, a=1.5, c=1, alpha=0.3, gamma=0.15)
-        self.explore_around_best(n_samples=10)
-        
-        self.spsa_optimize(iterations=20, a=0.8, c=0.6, alpha=0.3, gamma=0.15)
-        self.explore_around_best(n_samples=10)
 
-        self.test_final_configuration() # Test and print final results
-       
-        # print("\nOptimization complete!")
-        # print(f"Best score: {self.best_score:.2f}")
+        self.explore_around_best(n_samples=10)
+        self.spsa_optimize(iterations=30, a=0.8, c=0.6, alpha=0.3, gamma=0.15)
+
+        # Test and print final results
+        self.test_final_configuration()
+        
+        print("\nOptimization complete!")
+        print(f"Best score: {self.best_score:.2f}")
         print("\nFinal heater configuration:")
         print(self.format_config())
         
@@ -428,10 +457,10 @@ class SPSALogicGateOptimizer:
 
 
 def main():
-    # Create optimizer for the selected gate type
+    # Create optimizer for decoder
     start_time = time.time()
 
-    optimizer = SPSALogicGateOptimizer(GATE_TYPE)
+    optimizer = SPSADecoderOptimizer()
     
     try:
         # Run optimization
