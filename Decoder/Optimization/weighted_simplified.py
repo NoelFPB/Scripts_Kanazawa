@@ -15,8 +15,6 @@ INPUT_PINS = [36, 37]  # Input pins (A, B)
 # Voltage definitions
 V_MIN = 0.1     # Representing logical LOW
 V_MAX = 4.9    # Representing logical HIGH
-LOW_THRESHOLD = 2   # Outputs below this are considered LOW (only for input determination)
-HIGH_THRESHOLD = 3.5  # Outputs above this are considered HIGH (only for final testing)
 
 # Heater configuration
 FIXED_FIRST_LAYER = list(range(33, 40))
@@ -100,9 +98,9 @@ class SPSADecoderOptimizer:
         
         # Component weights (sum to 1.0) - Only focus on what matters for separation
         WEIGHTS = {
-            'high_consistency': 0.2,  # Consistency of HIGH outputs
+            'high_consistency': 0.3,  # Consistency of HIGH outputs
             'low_consistency': 0.2,   # Consistency of LOW outputs  
-            'separation': 0.5,         # Primary: separation between HIGH/LOW
+            'separation': 0.4,         # Primary: separation between HIGH/LOW
             'success_bonus': 0.1       # Bonus for correct relative ordering
         }
         
@@ -116,9 +114,8 @@ class SPSADecoderOptimizer:
         # Test each input combination
         for test_config in TEST_CONFIGURATIONS:
             input_a, input_b = test_config
-            
-            # Determine expected active output (only use threshold for input determination)
-            expected_output_idx = (1 if input_b > LOW_THRESHOLD else 0) + 2 * (1 if input_a > LOW_THRESHOLD else 0)
+
+            expected_output_idx = TEST_CONFIGURATIONS.index((input_a, input_b))
             
             # Configure and measure
             current_config = config.copy()
@@ -261,7 +258,7 @@ class SPSADecoderOptimizer:
             
             print(f"LHS configuration {i+1}/{n_samples-1}: Score = {score:.2f}")
             
-    def explore_around_best(self, n_samples=5):
+    def explore_around_best(self, n_samples=5, p = 0.3):
         """Local exploration around best configuration"""
         self.optimization_phase = 'exploration'
         if not self.best_config:
@@ -278,7 +275,7 @@ class SPSADecoderOptimizer:
             for h in random.sample(MODIFIABLE_HEATERS, max(1, len(MODIFIABLE_HEATERS) // 3)):
                 current = new_config.get(h, 0.1)
                 # Small random perturbation (±0.3V max)
-                perturbation = random.uniform(-0.3, 0.3)
+                perturbation = random.uniform(-p, -p)
                 new_config[h] = max(0.1, min(4.9, current + perturbation))
             
             # Evaluate
@@ -362,7 +359,7 @@ class SPSADecoderOptimizer:
                     # Otherwise continue from new point
                     theta = theta_new.copy()
             
-            print(f'Iteration: {k} Step size {ak:.2f} Perturbation size {ck:.2f} Best {self.best_score:.2f} Score {score:.2f}')
+            print(f'Iteration: {k} a {ak:.2f} c {ck:.2f} Best {self.best_score:.2f} Score {score:.2f}')
 
 
     def test_final_configuration(self):
@@ -437,13 +434,26 @@ class SPSADecoderOptimizer:
     def optimize(self):
         """Run multi-stage optimization for decoder"""
         print("Starting decoder optimization...")
-        self.initial_sampling(n_samples=50)
-
+        self.initial_sampling(n_samples=100)
         self.explore_around_best(n_samples=10)
-        self.spsa_optimize(iterations=30, a=1.5, c=1, alpha=0.3, gamma=0.15)
 
-        self.explore_around_best(n_samples=10)
-        self.spsa_optimize(iterations=30, a=0.8, c=0.6, alpha=0.3, gamma=0.15)
+        iteration_count = 0
+        while self.best_score < 90:
+            iteration_count += 1
+            print(iteration_count)            
+            # Increase exploration every few iterations
+            if iteration_count % 3 == 0:
+                # More aggressive exploration
+                self.spsa_optimize(iterations=25, a=2, c=1.5, alpha=0.3, gamma=0.15)
+                self.explore_around_best(n_samples=15)
+            elif iteration_count % 5 == 0:
+                # A little more aggressive every 10
+                self.spsa_optimize(iterations=25, a=3, c=2, alpha=0.4, gamma=0.2)
+                self.explore_around_best(n_samples=20, p = 0.5)
+            else:
+                self.spsa_optimize(iterations=25, a=1.5, c=1, alpha=0.3, gamma=0.15)
+                self.explore_around_best(n_samples=15)
+                
 
         # Test and print final results
         self.test_final_configuration()

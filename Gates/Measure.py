@@ -20,12 +20,12 @@ HEATER_COMBINATIONS = {
 }
 
 # Measurement parameters
-NUM_MEASUREMENTS = 10  # Number of measurements to average
+NUM_MEASUREMENTS = 3  # Number of measurements to average
 MEASUREMENT_DELAY = 0.1  # Delay between measurements in seconds
 
 # Channel selection - set to True for channels you want to measure
 # Channel indices: 0=CH1, 1=CH2, 2=CH3, 3=CH4
-CHANNELS_TO_MEASURE = [0, True, 0, 0]  # By default, measure all channels
+CHANNELS_TO_MEASURE = [1, True, 1, 1]  # By default, measure all channels
 
 def init_hardware():
     # Initialize oscilloscope
@@ -116,7 +116,7 @@ def display_all_heaters(heater_values):
 
 def main():
     try:
-            initial_config = {0: 4.64, 1: 4.62, 2: 2.86, 3: 2.47, 4: 4.49, 5: 4.7, 6: 2.56, 7: 3.66, 8: 1.43, 9: 4.39, 10: 3.65, 11: 3.9, 12: 3.01, 13: 4.7, 14: 3.82, 15: 0.77, 16: 0.58, 17: 0.69, 18: 2.79, 19: 2.78, 20: 3.59, 21: 3.2, 22: 2.27, 23: 3.13, 24: 3.04, 25: 2.2, 26: 3.46, 27: 4.41, 28: 4.8, 29: 2.31, 30: 1.28, 31: 2.42, 32: 4.9, 33: 0.01, 34: 0.01, 35: 0.01, 36: 0.0, 37: 0.0, 38: 0.01, 39: 0.01}
+            initial_config = {0: 4.02, 1: 3.54, 2: 4.15, 3: 3.05, 4: 2.43, 5: 1.36, 6: 3.56, 7: 4.16, 8: 2.11, 9: 0.75, 10: 2.07, 11: 4.38, 12: 3.09, 13: 2.71, 14: 3.97, 15: 0.89, 16: 2.39, 17: 1.43, 18: 1.93, 19: 0.5, 20: 4.36, 21: 1.86, 22: 3.59, 23: 4.69, 24: 3.47, 25: 4.05, 26: 0.38, 27: 4.23, 28: 4.9, 29: 4.36, 30: 4.07, 31: 4.61, 32: 3.46, 33: 0.01, 34: 0.01, 35: 0.01, 36: 0.0, 37: 0.0, 38: 0.01, 39: 0.01}
             heater_values = {int(k): float(v) for k, v in initial_config.items()}
             scope, ser = init_hardware()
 
