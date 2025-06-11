@@ -140,7 +140,7 @@ class DualWavelengthOptimizer:
                 print(f"  Wavelength set to {wavelength_nm}nm")
             return True
         except Exception as e:
-            print(f"❌ Wavelength setting failed: {e}")
+            print(f"Wavelength setting failed: {e}")
             return False
     
     def turn_laser_on(self):
@@ -150,7 +150,7 @@ class DualWavelengthOptimizer:
             time.sleep(1)
             return True
         except Exception as e:
-            print(f"❌ Laser ON failed: {e}")
+            print(f"Laser ON failed: {e}")
             return False
     
     def turn_laser_off(self):
@@ -160,7 +160,7 @@ class DualWavelengthOptimizer:
             time.sleep(1)
             return True
         except Exception as e:
-            print(f"❌ Laser OFF failed: {e}")
+            print(f"Laser OFF failed: {e}")
             return False
     
     def send_heater_values(self, config):
@@ -524,7 +524,7 @@ class DualWavelengthOptimizer:
         """SPSA optimization using batch evaluation"""
         
         if not self.best_config:
-            print("❌ No initial configuration available for SPSA")
+            print("No initial configuration available for SPSA")
             return
         
         theta = {h: self.best_config.get(h, 0.1) for h in MODIFIABLE_HEATERS}
@@ -656,7 +656,7 @@ class DualWavelengthOptimizer:
         print(f"\nTesting at 1548nm ({self.gate_1548} gate):")
         self.set_wavelength(1548)
         self.turn_laser_on()
-        time.sleep(1)
+        time.sleep(25)
         
         for input_state in INPUT_COMBINATIONS:
             current_config = self.best_config.copy()
@@ -671,13 +671,13 @@ class DualWavelengthOptimizer:
             print(f"  Inputs {input_state}: {output:.4f}V (expect {'HIGH' if expected else 'LOW'})")
         
         self.turn_laser_off()
-        time.sleep(1)
+        time.sleep(5)
         
         # Test at 1552nm (OR gate)
         print(f"\nTesting at 1552nm ({self.gate_1552} gate):")
         self.set_wavelength(1552)
         self.turn_laser_on()
-        time.sleep(1)
+        time.sleep(25)
         
         for input_state in INPUT_COMBINATIONS:
             current_config = self.best_config.copy()
@@ -794,7 +794,6 @@ class DualWavelengthOptimizer:
         print("Cleanup complete")
     
     def optimize(self):
-        """Run the full dual-wavelength optimization with batch approach"""
         print(f"\nDUAL-WAVELENGTH BATCH OPTIMIZATION STARTING")
         print(f"Target: {self.gate_1548} at 1548nm, {self.gate_1552} at 1552nm")
         print(f"Laser settling time: 25 seconds per wavelength")
@@ -838,31 +837,23 @@ class DualWavelengthOptimizer:
             self.cleanup()
 
 def main():
-    """Main execution function"""
     start_time = time.time()
-    
-    print("🌈 DUAL-WAVELENGTH LOGIC GATE OPTIMIZER")
-    print("Searching for heater configuration that produces:")
-    print("  - AND gate behavior at 1548nm")
-    print("  - OR gate behavior at 1552nm")
-    print()
-    
     optimizer = DualWavelengthOptimizer(GATE_1548, GATE_1552)
     
     try:
         best_config, best_score = optimizer.optimize()
         
         if best_config:
-            print(f"\n🎉 OPTIMIZATION COMPLETE!")
+            print(f"\nOPTIMIZATION COMPLETE!")
             print(f"Best combined score: {best_score:.2f}")
         else:
-            print(f"\n❌ OPTIMIZATION FAILED")
+            print(f"\nOPTIMIZATION FAILED")
             
     except KeyboardInterrupt:
-        print(f"\n⏹️ Optimization interrupted by user")
+        print(f"\nOptimization interrupted by user")
         
     except Exception as e:
-        print(f"\n💥 Unexpected error: {e}")
+        print(f"\nUnexpected error: {e}")
         
     finally:
         try:
@@ -872,7 +863,7 @@ def main():
         
         end_time = time.time()
         execution_time = end_time - start_time
-        print(f"\n⏱️ Total execution time: {execution_time/60:.1f} minutes")
+        print(f"\nTotal execution time: {execution_time/60:.1f} minutes")
 
 if __name__ == "__main__":
     main()
