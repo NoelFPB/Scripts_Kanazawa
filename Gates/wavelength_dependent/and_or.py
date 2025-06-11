@@ -17,8 +17,8 @@ GATE_1552 = "OR"    # Logic gate at 1552nm
 INPUT_HEATERS = [36, 37]  # Heaters for input A and B
 
 # Voltage definitions
-V_MIN = 0.1     # Representing logical LOW
-V_MAX = 4.9    # Representing logical HIGH
+V_MIN = 0.05     # Representing logical LOW
+V_MAX = 4.95    # Representing logical HIGH
 
 # Heater configuration
 FIXED_FIRST_LAYER = list(range(33, 40))
@@ -180,121 +180,100 @@ class DualWavelengthOptimizer:
         except Exception as e:
             print(f"Measurement error: {e}")
             return None
-    
-    def evaluate_gate_at_wavelength(self, config, wavelength, truth_table, gate_name):
-        """Evaluate how well a configuration performs as a specific gate at a wavelength"""
         
-        # Set wavelength
-        if not self.set_wavelength(wavelength):
-            return -1000, {}
+        # Add this method to your DualWavelengthOptimizer class
+
+
+    def calculate_balanced_score(self, high_outputs, low_outputs, gate_name):
+        """Single balanced scoring that requires BOTH extinction ratio AND consistency"""
         
-        if not self.turn_laser_on():
-            return -1000, {}
-        
-        time.sleep(1)  # Let everything settle
-        
-        # Component weights for single gate evaluation
-        WEIGHTS = {
-            'high_consistency': 0.2,
-            'low_consistency': 0.1,   
-            'separation': 0.6,
-            'success_bonus': 0.1
-        }
-        
-        component_scores = {k: 0.0 for k in WEIGHTS}
-        
-        # Collect outputs
-        high_outputs = []
-        low_outputs = []
-        detailed_results = {}
-        
-        for input_state in INPUT_COMBINATIONS:
-            current_config = config.copy()
-            current_config[INPUT_HEATERS[0]] = input_state[0]
-            current_config[INPUT_HEATERS[1]] = input_state[1]
-            
-            expected_high = truth_table[input_state]
-            
-            self.send_heater_values(current_config)
-            time.sleep(0.25)  # Longer settling time for wavelength changes
-            
-            output = self.measure_output()
-            if output is None:
-                self.turn_laser_off()
-                return -1000, {}
-            
-            detailed_results[input_state] = {
-                'output': output,
-                'expected_high': expected_high
-            }
-            
-            if expected_high:
-                high_outputs.append(output)
-            else:
-                low_outputs.append(output)
-        
-        self.turn_laser_off()
-        
-        # If missing states, penalize
         if not high_outputs or not low_outputs:
-            return -500, detailed_results
+            return -50
         
-        # Calculate consistency scores
-        if len(high_outputs) > 1:
-            avg_high = sum(high_outputs) / len(high_outputs)
-            high_variance = sum((o - avg_high)**2 for o in high_outputs) / len(high_outputs)
-            component_scores['high_consistency'] = 1.0 / (1.0 + (high_variance / 0.25))
-        else:
-            component_scores['high_consistency'] = 1.0
-        
-        if len(low_outputs) > 1:
-            avg_low = sum(low_outputs) / len(low_outputs)
-            low_variance = sum((o - avg_low)**2 for o in low_outputs) / len(low_outputs)
-            component_scores['low_consistency'] = 1.0 / (1.0 + (low_variance / 0.25))
-        else:
-            component_scores['low_consistency'] = 1.0
-        
-        # Separation score
         avg_high = sum(high_outputs) / len(high_outputs)
         avg_low = sum(low_outputs) / len(low_outputs)
+        avg_low = max(avg_low, 0.01)
+        
+        import math
+        
+        # 1. EXTINCTION RATIO (smooth, 40 points max)
+        extinction_ratio = avg_high / avg_low
+        er_score = 40 * math.tanh((extinction_ratio - 1.2) / 2.0)
+        er_score = max(0, er_score)  # No negative scores from ER
+        
+        # 2. CONSISTENCY REQUIREMENTS (40 points max total)
+        def consistency_score(outputs):
+            if len(outputs) <= 1:
+                return 20  # Perfect if only one value
+            
+            avg_val = sum(outputs) / len(outputs)
+            std_dev = math.sqrt(sum((x - avg_val)**2 for x in outputs) / len(outputs))
+            
+            # Smooth penalty: 0.1V std -> 18pts, 0.3V std -> 10pts, 0.5V+ std -> 0pts
+            score = 20 * math.exp(-3 * std_dev)
+            return score
+        
+        high_consistency = consistency_score(high_outputs)
+        low_consistency = consistency_score(low_outputs)
+        
+        # 3. MINIMUM SEPARATION REQUIREMENT (20 points max)
         separation = avg_high - avg_low
+        sep_score = min(20, separation * 10)  # 2V separation = 20 points
         
-        all_outputs = high_outputs + low_outputs
-        voltage_range_used = max(all_outputs) - min(all_outputs)
+        # TOTAL: Extinction ratio + Consistency + Separation
+        total_score = er_score + high_consistency + low_consistency + sep_score
         
-        if voltage_range_used > 0:
-            normalized_separation = abs(separation) / voltage_range_used
-            component_scores['separation'] = min(1.0, normalized_separation * 2)
-        else:
-            component_scores['separation'] = 0.0
-        
-        # Success bonus
-        success_count = 0
-        for high_out in high_outputs:
-            for low_out in low_outputs:
-                if high_out > low_out:
-                    success_count += 1
-        
-        total_comparisons = len(high_outputs) * len(low_outputs)
-        success_rate = success_count / total_comparisons if total_comparisons > 0 else 0
-        component_scores['success_bonus'] = success_rate
-        
-        # Final score
-        final_score = sum(component_scores[k] * WEIGHTS[k] * 100 for k in WEIGHTS)
-        
-        # Add detailed analysis
-        detailed_results['summary'] = {
-            'gate_name': gate_name,
-            'wavelength': wavelength,
-            'avg_high': avg_high,
-            'avg_low': avg_low,
-            'separation': separation,
-            'success_rate': success_rate,
-            'final_score': final_score,
-            'component_scores': component_scores
+        return total_score
+
+
+    def get_gate_weights(self, gate_name):
+        """Return appropriate weights for specific gate types"""
+        GATE_WEIGHTS = {
+            "AND": {
+                'high_consistency': 0,  # Less critical (only 1 HIGH state)
+                'low_consistency': 0.3,   # More critical (3 LOW states)
+                'separation': 0.6,
+                'success_bonus': 0.1
+            },
+            "OR": {
+                'high_consistency': 0.3,  # More critical (3 HIGH states)
+                'low_consistency': 0,   # Less critical (only 1 LOW state)
+                'separation': 0.6,
+                'success_bonus': 0.1
+            },
+            "NAND": {
+                'high_consistency': 0.25,
+                'low_consistency': 0.15,
+                'separation': 0.5,
+                'success_bonus': 0.1
+            },
+            "NOR": {
+                'high_consistency': 0.15,
+                'low_consistency': 0.25,
+                'separation': 0.5,
+                'success_bonus': 0.1
+            },
+            "XOR": {
+                'high_consistency': 0.2,   # Equal states
+                'low_consistency': 0.2,
+                'separation': 0.5,
+                'success_bonus': 0.1
+            },
+            "XNOR": {
+                'high_consistency': 0.2,
+                'low_consistency': 0.2,
+                'separation': 0.5,
+                'success_bonus': 0.1
+            }
         }
         
-        return final_score, detailed_results
+        # Return gate-specific weights or default if not found
+        return GATE_WEIGHTS.get(gate_name, {
+            'high_consistency': 0.2,
+            'low_consistency': 0.1,
+            'separation': 0.6,
+            'success_bonus': 0.1
+        })
     
     def evaluate_single_wavelength_batch(self, configs, wavelength, truth_table, gate_name):
         """Evaluate multiple configurations at a single wavelength (batch mode)"""
@@ -307,8 +286,8 @@ class DualWavelengthOptimizer:
         if not self.turn_laser_on():
             return [(config, -1000, {}) for config in configs]
         
-        print(f"Waiting 25 seconds for laser to stabilize...")
-        time.sleep(25)  # Wait for laser to reach operating condition
+        print(f"Waiting for laser to stabilize...")
+        time.sleep(12)  # Wait for laser to reach operating condition
         
         print(f"Laser stable at {wavelength}nm. Testing {len(configs)} configurations...")
         
@@ -332,12 +311,7 @@ class DualWavelengthOptimizer:
         """Evaluate a single configuration at the current wavelength (laser already stable)"""
         
         # Component weights for single gate evaluation
-        WEIGHTS = {
-            'high_consistency': 0.2,
-            'low_consistency': 0.1,   
-            'separation': 0.6,
-            'success_bonus': 0.1
-        }
+        WEIGHTS = self.get_gate_weights(gate_name)
         
         component_scores = {k: 0.0 for k in WEIGHTS}
         
@@ -374,63 +348,98 @@ class DualWavelengthOptimizer:
         if not high_outputs or not low_outputs:
             return -500, detailed_results
         
-        # Calculate consistency scores
-        if len(high_outputs) > 1:
+        # # Calculate consistency scores
+        # if len(high_outputs) > 1:
+        #     avg_high = sum(high_outputs) / len(high_outputs)
+        #     high_variance = sum((o - avg_high)**2 for o in high_outputs) / len(high_outputs)
+        #     component_scores['high_consistency'] = 1.0 / (1.0 + (high_variance / 0.25))
+        # else:
+        #     component_scores['high_consistency'] = 1.0
+        
+        # if len(low_outputs) > 1:
+        #     avg_low = sum(low_outputs) / len(low_outputs)
+        #     low_variance = sum((o - avg_low)**2 for o in low_outputs) / len(low_outputs)
+        #     component_scores['low_consistency'] = 1.0 / (1.0 + (low_variance / 0.25))
+        # else:
+        #     component_scores['low_consistency'] = 1.0
+        
+        # # Separation score
+        # avg_high = sum(high_outputs) / len(high_outputs)
+        # avg_low = sum(low_outputs) / len(low_outputs)
+        # separation = avg_high - avg_low
+        
+        # all_outputs = high_outputs + low_outputs
+        # voltage_range_used = max(all_outputs) - min(all_outputs)
+        
+        # if voltage_range_used > 0:
+        #     normalized_separation = abs(separation) / voltage_range_used
+        #     component_scores['separation'] = min(1.0, normalized_separation * 2)
+        # else:
+        #     component_scores['separation'] = 0.0
+        
+        # # Success bonus
+        # success_count = 0
+        # for high_out in high_outputs:
+        #     for low_out in low_outputs:
+        #         if high_out > low_out:
+        #             success_count += 1
+        
+        # total_comparisons = len(high_outputs) * len(low_outputs)
+        # success_rate = success_count / total_comparisons if total_comparisons > 0 else 0
+        # component_scores['success_bonus'] = success_rate
+        
+        # # Final score
+        # final_score = sum(component_scores[k] * WEIGHTS[k] * 100 for k in WEIGHTS)
+        
+        # # Add detailed analysis
+        # detailed_results['summary'] = {
+        #     'gate_name': gate_name,
+        #     'wavelength': wavelength,
+        #     'avg_high': avg_high,
+        #     'avg_low': avg_low,
+        #     'separation': separation,
+        #     'success_rate': success_rate,
+        #     'final_score': final_score,
+        #     'component_scores': component_scores
+        # }
+        
+        # return final_score, detailed_results
+
+        # USE THE SINGLE BALANCED SCORING
+        final_score = self.calculate_balanced_score(high_outputs, low_outputs, gate_name)
+        
+        # Add summary for debugging
+        if high_outputs and low_outputs:
             avg_high = sum(high_outputs) / len(high_outputs)
-            high_variance = sum((o - avg_high)**2 for o in high_outputs) / len(high_outputs)
-            component_scores['high_consistency'] = 1.0 / (1.0 + (high_variance / 0.25))
-        else:
-            component_scores['high_consistency'] = 1.0
-        
-        if len(low_outputs) > 1:
             avg_low = sum(low_outputs) / len(low_outputs)
-            low_variance = sum((o - avg_low)**2 for o in low_outputs) / len(low_outputs)
-            component_scores['low_consistency'] = 1.0 / (1.0 + (low_variance / 0.25))
-        else:
-            component_scores['low_consistency'] = 1.0
-        
-        # Separation score
-        avg_high = sum(high_outputs) / len(high_outputs)
-        avg_low = sum(low_outputs) / len(low_outputs)
-        separation = avg_high - avg_low
-        
-        all_outputs = high_outputs + low_outputs
-        voltage_range_used = max(all_outputs) - min(all_outputs)
-        
-        if voltage_range_used > 0:
-            normalized_separation = abs(separation) / voltage_range_used
-            component_scores['separation'] = min(1.0, normalized_separation * 2)
-        else:
-            component_scores['separation'] = 0.0
-        
-        # Success bonus
-        success_count = 0
-        for high_out in high_outputs:
-            for low_out in low_outputs:
-                if high_out > low_out:
-                    success_count += 1
-        
-        total_comparisons = len(high_outputs) * len(low_outputs)
-        success_rate = success_count / total_comparisons if total_comparisons > 0 else 0
-        component_scores['success_bonus'] = success_rate
-        
-        # Final score
-        final_score = sum(component_scores[k] * WEIGHTS[k] * 100 for k in WEIGHTS)
-        
-        # Add detailed analysis
-        detailed_results['summary'] = {
-            'gate_name': gate_name,
-            'wavelength': wavelength,
-            'avg_high': avg_high,
-            'avg_low': avg_low,
-            'separation': separation,
-            'success_rate': success_rate,
-            'final_score': final_score,
-            'component_scores': component_scores
-        }
+            separation = avg_high - avg_low
+            extinction_ratio = avg_high / max(avg_low, 0.01)
+            
+            # Calculate consistency metrics
+            if len(high_outputs) > 1:
+                high_std = (sum((x - avg_high)**2 for x in high_outputs) / len(high_outputs))**0.5
+            else:
+                high_std = 0
+                
+            if len(low_outputs) > 1:
+                low_std = (sum((x - avg_low)**2 for x in low_outputs) / len(low_outputs))**0.5
+            else:
+                low_std = 0
+            
+            detailed_results['summary'] = {
+                'gate_name': gate_name,
+                'wavelength': wavelength,
+                'avg_high': avg_high,
+                'avg_low': avg_low,
+                'separation': separation,
+                'extinction_ratio': extinction_ratio,
+                'high_std': high_std,
+                'low_std': low_std,
+                'final_score': final_score
+            }
         
         return final_score, detailed_results
-    
+
     def evaluate_configs_dual_wavelength(self, configs):
         """Evaluate multiple configurations at both wavelengths using batch approach"""
         print(f"\nDUAL-WAVELENGTH BATCH EVALUATION")
@@ -520,8 +529,96 @@ class DualWavelengthOptimizer:
         
         return results
     
+    # def spsa_batch_optimize(self, iterations=10, batch_size=6, a=0.8, c=0.3, alpha=0.35, gamma=0.101):
+    #     """SPSA optimization using batch evaluation"""
+        
+    #     if not self.best_config:
+    #         print("No initial configuration available for SPSA")
+    #         return
+        
+    #     theta = {h: self.best_config.get(h, 0.1) for h in MODIFIABLE_HEATERS}
+    #     heater_keys = sorted(MODIFIABLE_HEATERS)
+    #     iterations_without_improvement = 0
+        
+    #     print(f"\nSPSA BATCH OPTIMIZATION")
+    #     print(f"Iterations: {iterations}, Batch size: {batch_size}")
+        
+    #     for k in range(1, iterations + 1):
+    #         print(f"\n--- SPSA Iteration {k}/{iterations} ---")
+            
+    #         # Update parameters
+    #         ak = a / (k ** alpha)
+    #         ck = max(0.3, c / (k ** gamma))
+            
+    #         # Generate batch of configurations to test
+    #         configs_to_test = []
+            
+    #         for b in range(batch_size):
+    #             # Generate perturbation
+    #             delta = {h: 1 if random.random() > 0.5 else -1 for h in heater_keys}
+                
+    #             # Create perturbed configurations
+    #             theta_plus = {h: max(0.1, min(4.9, theta[h] + ck * delta[h])) for h in heater_keys}
+    #             theta_minus = {h: max(0.1, min(4.9, theta[h] - ck * delta[h])) for h in heater_keys}
+                
+    #             configs_to_test.append((theta_plus, theta_minus, delta))
+            
+    #         # Flatten configurations for batch evaluation
+    #         all_configs = []
+    #         for theta_plus, theta_minus, _ in configs_to_test:
+    #             all_configs.extend([theta_plus, theta_minus])
+            
+    #         print(f"Evaluating {len(all_configs)} configurations in batch...")
+    #         results = self.evaluate_configs_dual_wavelength(all_configs)
+            
+    #         # Process results and update theta
+    #         best_iteration_score = -float('inf')
+    #         best_iteration_theta = None
+            
+    #         for i, (theta_plus, theta_minus, delta) in enumerate(configs_to_test):
+    #             # Get scores for this perturbation pair
+    #             idx_plus = i * 2
+    #             idx_minus = i * 2 + 1
+                
+    #             _, score_plus, _ = results[idx_plus]
+    #             _, score_minus, _ = results[idx_minus]
+                
+    #             # Estimate gradient for this perturbation
+    #             g_hat = {h: (score_plus - score_minus) / (2 * ck * delta[h]) for h in heater_keys}
+                
+    #             # Create new theta candidate
+    #             theta_candidate = {h: max(0.1, min(4.9, theta[h] + ak * g_hat[h])) for h in heater_keys}
+                
+    #             # Track best candidate from this iteration
+    #             candidate_score = max(score_plus, score_minus)
+    #             if candidate_score > best_iteration_score:
+    #                 best_iteration_score = candidate_score
+    #                 if score_plus > score_minus:
+    #                     best_iteration_theta = configs_to_test[i][0].copy()  # theta_plus
+    #                 else:
+    #                     best_iteration_theta = configs_to_test[i][1].copy()  # theta_minus
+            
+    #         # Update theta based on best result from this iteration
+    #         if best_iteration_score > self.best_score:
+    #             theta = best_iteration_theta.copy()
+    #             iterations_without_improvement = 0
+    #             print(f"Improved! New best score: {self.best_score:.1f}")
+    #         else:
+    #             iterations_without_improvement += 1
+                
+    #             if iterations_without_improvement >= 3:  # Restart sooner with batch mode
+    #                 print(f"No improvement for {iterations_without_improvement} iterations. Restarting from best")
+    #                 theta = {h: self.best_config.get(h, 0.1) for h in MODIFIABLE_HEATERS}
+    #                 iterations_without_improvement = 0
+    #             else:
+    #                 # Small random perturbation to continue exploring
+    #                 theta = {h: max(0.1, min(4.9, v + random.uniform(-0.1, 0.1))) 
+    #                         for h, v in theta.items()}
+            
+    #         print(f"Step size: {ak:.3f}, Perturbation: {ck:.3f}, Best: {self.best_score:.1f}")
+    
     def spsa_batch_optimize(self, iterations=10, batch_size=6, a=0.8, c=0.3, alpha=0.35, gamma=0.101):
-        """SPSA optimization using batch evaluation"""
+        """Real SPSA optimization using batch evaluation"""
         
         if not self.best_config:
             print("No initial configuration available for SPSA")
@@ -529,7 +626,6 @@ class DualWavelengthOptimizer:
         
         theta = {h: self.best_config.get(h, 0.1) for h in MODIFIABLE_HEATERS}
         heater_keys = sorted(MODIFIABLE_HEATERS)
-        iterations_without_improvement = 0
         
         print(f"\nSPSA BATCH OPTIMIZATION")
         print(f"Iterations: {iterations}, Batch size: {batch_size}")
@@ -561,53 +657,43 @@ class DualWavelengthOptimizer:
             
             print(f"Evaluating {len(all_configs)} configurations in batch...")
             results = self.evaluate_configs_dual_wavelength(all_configs)
-            
-            # Process results and update theta
-            best_iteration_score = -float('inf')
-            best_iteration_theta = None
+
+            # Calculate average gradient across all perturbations
+            total_gradient = {h: 0.0 for h in heater_keys}
+            valid_gradients = 0
             
             for i, (theta_plus, theta_minus, delta) in enumerate(configs_to_test):
                 # Get scores for this perturbation pair
                 idx_plus = i * 2
                 idx_minus = i * 2 + 1
                 
-                _, score_plus, _ = results[idx_plus]
-                _, score_minus, _ = results[idx_minus]
+                # Fix: results contains (config, combined_score, details)
+                _, score_plus, _ = results[idx_plus]  # score_plus is the combined_score (float)
+                _, score_minus, _ = results[idx_minus]  # score_minus is the combined_score (float)
                 
-                # Estimate gradient for this perturbation
-                g_hat = {h: (score_plus - score_minus) / (2 * ck * delta[h]) for h in heater_keys}
+               
+
+                # Skip if either evaluation failed
+                if score_plus < -500 or score_minus < -500:
+                    continue
                 
-                # Create new theta candidate
-                theta_candidate = {h: max(0.1, min(4.9, theta[h] + ak * g_hat[h])) for h in heater_keys}
-                
-                # Track best candidate from this iteration
-                candidate_score = max(score_plus, score_minus)
-                if candidate_score > best_iteration_score:
-                    best_iteration_score = candidate_score
-                    if score_plus > score_minus:
-                        best_iteration_theta = configs_to_test[i][0].copy()  # theta_plus
-                    else:
-                        best_iteration_theta = configs_to_test[i][1].copy()  # theta_minus
+                # Calculate gradient estimate for this perturbation
+                for h in heater_keys:
+                    gradient_component = (score_plus - score_minus) / (2 * ck * delta[h])
+                    total_gradient[h] += gradient_component
+                valid_gradients += 1
             
-            # Update theta based on best result from this iteration
-            if best_iteration_score > self.best_score:
-                theta = best_iteration_theta.copy()
-                iterations_without_improvement = 0
-                print(f"Improved! New best score: {self.best_score:.1f}")
+            # Update theta using average gradient (THIS IS SPSA!)
+            if valid_gradients > 0:
+                for h in heater_keys:
+                    avg_gradient = total_gradient[h] / valid_gradients
+                    theta[h] = max(0.1, min(4.9, theta[h] + ak * avg_gradient))
+                     
             else:
-                iterations_without_improvement += 1
-                
-                if iterations_without_improvement >= 3:  # Restart sooner with batch mode
-                    print(f"No improvement for {iterations_without_improvement} iterations. Restarting from best")
-                    theta = {h: self.best_config.get(h, 0.1) for h in MODIFIABLE_HEATERS}
-                    iterations_without_improvement = 0
-                else:
-                    # Small random perturbation to continue exploring
-                    theta = {h: max(0.1, min(4.9, v + random.uniform(-0.1, 0.1))) 
-                            for h, v in theta.items()}
+                print("No valid gradients, keeping current theta")
             
             print(f"Step size: {ak:.3f}, Perturbation: {ck:.3f}, Best: {self.best_score:.1f}")
-    
+
     def focused_search_around_best(self, n_variations=12):
         """Generate variations around the best configuration and test in batch"""
         if not self.best_config:
@@ -651,33 +737,12 @@ class DualWavelengthOptimizer:
         
         print(f"\nTESTING FINAL DUAL-WAVELENGTH CONFIGURATION")
         print("=" * 60)
-        
-        # Test at 1548nm (AND gate)
-        print(f"\nTesting at 1548nm ({self.gate_1548} gate):")
-        self.set_wavelength(1548)
-        self.turn_laser_on()
-        time.sleep(25)
-        
-        for input_state in INPUT_COMBINATIONS:
-            current_config = self.best_config.copy()
-            current_config[INPUT_HEATERS[0]] = input_state[0]
-            current_config[INPUT_HEATERS[1]] = input_state[1]
-            
-            self.send_heater_values(current_config)
-            time.sleep(0.3)
-            output = self.measure_output()
-            expected = self.truth_table_1548[input_state]
-            
-            print(f"  Inputs {input_state}: {output:.4f}V (expect {'HIGH' if expected else 'LOW'})")
-        
-        self.turn_laser_off()
-        time.sleep(5)
-        
+
         # Test at 1552nm (OR gate)
         print(f"\nTesting at 1552nm ({self.gate_1552} gate):")
         self.set_wavelength(1552)
         self.turn_laser_on()
-        time.sleep(25)
+        time.sleep(12)
         
         for input_state in INPUT_COMBINATIONS:
             current_config = self.best_config.copy()
@@ -693,6 +758,26 @@ class DualWavelengthOptimizer:
         
         self.turn_laser_off()
         
+        # Test at 1548nm (AND gate)
+        print(f"\nTesting at 1548nm ({self.gate_1548} gate):")
+        self.set_wavelength(1548)
+        self.turn_laser_on()
+        time.sleep(12)
+        
+        for input_state in INPUT_COMBINATIONS:
+            current_config = self.best_config.copy()
+            current_config[INPUT_HEATERS[0]] = input_state[0]
+            current_config[INPUT_HEATERS[1]] = input_state[1]
+            
+            self.send_heater_values(current_config)
+            time.sleep(0.3)
+            output = self.measure_output()
+            expected = self.truth_table_1548[input_state]
+            
+            print(f"  Inputs {input_state}: {output:.4f}V (expect {'HIGH' if expected else 'LOW'})")
+        
+        self.turn_laser_off()
+
         # Print best details if available
         if self.best_details:
             print(f"\nPERFORMANCE SUMMARY:")
@@ -806,11 +891,11 @@ class DualWavelengthOptimizer:
             
             # Phase 2: SPSA optimization (batch mode)
             print(f"\nPHASE 2: SPSA Optimization")
-            self.spsa_batch_optimize(iterations=8, batch_size=6)
+            self.spsa_batch_optimize(iterations=3, batch_size=6)
             
             # Phase 3: Focused search around best
             print(f"\nPHASE 3: Focused Search")
-            self.focused_search_around_best(n_variations=12)
+            self.focused_search_around_best(n_variations=10)
             
             # Phase 4: Final testing
             print(f"\nPHASE 4: Final Validation")
@@ -818,12 +903,7 @@ class DualWavelengthOptimizer:
             
             print(f"\nFINAL CONFIGURATION:")
             config = self.format_config()
-            print(json.dumps(config, indent=2))
-            
-            # Calculate total time estimate
-            total_wavelength_switches = 2 * (20 + 8*6 + 12 + 2)  # Rough estimate
-            estimated_time = total_wavelength_switches * 25 / 60  # Minutes
-            print(f"\nEstimated total optimization time: ~{estimated_time:.0f} minutes")
+            print(config)
             
             self.save_results()
             
@@ -854,7 +934,8 @@ def main():
         
     except Exception as e:
         print(f"\nUnexpected error: {e}")
-        
+    
+    # actually I am already calling cleanup before
     finally:
         try:
             optimizer.cleanup()
