@@ -11,55 +11,31 @@ from sklearn.gaussian_process.kernels import RBF, WhiteKernel, ConstantKernel
 SERIAL_PORT = 'COM4'
 BAUD_RATE = 115200
 
-# === GATE CONFIGURATION ===
-GATE_TYPE = "XOR"  # Logic gate type to optimize (AND, OR, NAND, NOR, XOR, XNOR)
-INPUT_HEATERS = [36, 37]  # Heaters for input A and B
+# === DECODER CONFIGURATION ===
+INPUT_PINS = [36, 37]  # Input pins (A, B)
 
 # Voltage definitions
 V_MIN = 0.1     # Representing logical LOW
-V_MAX = 4.9    # Representing logical HIGH
+V_MAX = 4.9     # Representing logical HIGH
 
 # Heater configuration
 FIXED_FIRST_LAYER = list(range(33, 40))
-MODIFIABLE_HEATERS = [i for i in range(33) if i not in INPUT_HEATERS]
+MODIFIABLE_HEATERS = [i for i in range(33) if i not in INPUT_PINS]
 
-# Input combinations for testing
-INPUT_COMBINATIONS = [
-    (V_MIN, V_MIN),
-    (V_MIN, V_MAX),
-    (V_MAX, V_MIN),
-    (V_MAX, V_MAX)
+# Test configurations for decoder
+TEST_CONFIGURATIONS = [
+    (V_MIN, V_MIN),    # Input 00 (output 0 should be high, others low)
+    (V_MIN, V_MAX),    # Input 01 (output 1 should be high, others low)
+    (V_MAX, V_MIN),    # Input 10 (output 2 should be high, others low)
+    (V_MAX, V_MAX)     # Input 11 (output 3 should be high, others low)
 ]
 
-def generate_truth_table(gate_type):
-    """Generate truth table for given gate type"""
-    truth_tables = {
-        "AND": [False, False, False, True],
-        "OR": [False, True, True, True],
-        "NAND": [True, True, True, False],
-        "NOR": [True, False, False, False],
-        "XOR": [False, True, True, False],
-        "XNOR": [True, False, False, True]
-    }
-    
-    if gate_type not in truth_tables:
-        raise ValueError(f"Unknown gate type: {gate_type}")
-    
-    return {input_pair: output for input_pair, output in 
-            zip(INPUT_COMBINATIONS, truth_tables[gate_type])}
-
-class BayesianLogicGateOptimizer:
+class BayesianDecoderOptimizer:
     """
-    Optimize a physical logic gate using Bayesian Optimization with Gaussian Processes.
+    Optimize a physical decoder using Bayesian Optimization with Gaussian Processes.
     """
-    def __init__(self, gate_type=GATE_TYPE):
-        # Initialize gate type and truth table
-        self.gate_type = gate_type
-        self.truth_table = generate_truth_table(gate_type)
-        
-        print(f"Optimizing {gate_type} gate with truth table:")
-        for inputs, output in self.truth_table.items():
-            print(f"  {inputs} -> {'HIGH' if output else 'LOW'}")
+    def __init__(self):
+        print("Initializing Bayesian decoder optimization...")
         
         # Bayesian optimization storage
         self.X_evaluated = []  # Configuration vectors
@@ -79,11 +55,11 @@ class BayesianLogicGateOptimizer:
         
         # Set fixed first layer values
         for h in FIXED_FIRST_LAYER:
-            if h not in INPUT_HEATERS:
+            if h not in INPUT_PINS:
                 self.base_config[h] = 0.01
 
     def _init_scope(self):
-        """Initialize oscilloscope for logic gate output measurement"""
+        """Initialize oscilloscope for decoder output measurement"""
         rm = pyvisa.ResourceManager()
         resources = rm.list_resources()
         if not resources:
@@ -91,11 +67,12 @@ class BayesianLogicGateOptimizer:
         scope = rm.open_resource(resources[0])
         scope.timeout = 5000
         
-        # Setup Channel 2 for logic gate output measurement
-        scope.write(':CHANnel2:DISPlay ON')
-        scope.write(':CHANnel2:SCALe 2')
-        scope.write(':CHANnel2:OFFSet -6')
-        
+        # Setup all 4 channels for decoder output measurement
+        for channel_num in range(1, 5):
+            scope.write(f':CHANnel{channel_num}:DISPlay ON')
+            scope.write(f':CHANnel{channel_num}:SCALe 2')
+            scope.write(f':CHANnel{channel_num}:OFFSet -6')
+            
         return scope
 
     def config_to_array(self, config):
@@ -115,72 +92,79 @@ class BayesianLogicGateOptimizer:
         self.serial.reset_input_buffer()
         self.serial.reset_output_buffer()
 
-    def measure_output(self):
-        """Measure the logic gate output voltage from oscilloscope"""
+    def measure_outputs(self):
+        """Measure all 4 decoder output voltages from oscilloscope"""
         try:
-            value = float(self.scope.query(':MEASure:STATistic:ITEM? CURRent,VMAX,CHANnel2'))
-            return round(value, 5)
+            outputs = []
+            for channel in range(1, 5):
+                value = float(self.scope.query(f':MEASure:STATistic:ITEM? CURRent,VMAX,CHANnel{channel}'))
+                outputs.append(round(value, 5))
+            return outputs
         except Exception as e:
             print(f"Measurement error: {e}")
-            return None
+            return [None] * 4
 
     def evaluate_configuration(self, config):
         """
-        Logic gate scoring using worst-case extinction ratio:
-        ER = 10 * log10(min_HIGH_outputs / max_LOW_outputs)
+        Decoder scoring function optimized for Bayesian optimization.
         
-        This is more meaningful for logic gate reliability than the paper's method.
+        A decoder should have one HIGH output and three LOW outputs for each input combination.
+        We use extinction ratio concepts adapted for multi-output devices.
         """
         
-        # Collect all outputs for analysis
-        high_outputs = []
-        low_outputs = []
-        all_outputs = []
-        output_details = []
+        # Collect all measurements for analysis
+        all_active_outputs = []    # Outputs that should be HIGH
+        all_inactive_outputs = []  # Outputs that should be LOW
+        test_results = []
         
-        for input_state in INPUT_COMBINATIONS:
-            current_config = config.copy()
-            current_config[INPUT_HEATERS[0]] = input_state[0]
-            current_config[INPUT_HEATERS[1]] = input_state[1]
+        for test_idx, test_config in enumerate(TEST_CONFIGURATIONS):
+            input_a, input_b = test_config
+            expected_active_idx = test_idx  # Channel that should be active
             
-            expected_high = self.truth_table[input_state]
+            # Configure inputs and measure
+            current_config = config.copy()
+            current_config[INPUT_PINS[0]] = input_a
+            current_config[INPUT_PINS[1]] = input_b
             
             self.send_heater_values(current_config)
             time.sleep(0.20)
             
-            output = self.measure_output()
-            if output is None:
+            outputs = self.measure_outputs()
+            if None in outputs:
                 return -1000  # Hardware failure
             
-            all_outputs.append(output)
-            output_details.append({
-                'input': input_state,
-                'output': output,
-                'expected': 'HIGH' if expected_high else 'LOW'
-            })
+            # Separate active and inactive outputs
+            active_output = outputs[expected_active_idx]
+            inactive_outputs = [outputs[i] for i in range(4) if i != expected_active_idx]
             
-            if expected_high:
-                high_outputs.append(output)
-            else:
-                low_outputs.append(output)
+            all_active_outputs.append(active_output)
+            all_inactive_outputs.extend(inactive_outputs)
+            
+            test_results.append({
+                'input': test_config,
+                'expected_active': expected_active_idx,
+                'outputs': outputs,
+                'active_output': active_output,
+                'inactive_outputs': inactive_outputs
+            })
         
-        if len(all_outputs) != 4 or not high_outputs or not low_outputs:
+        if len(all_active_outputs) != 4 or len(all_inactive_outputs) != 12:
             return -500  # Missing measurements
         
-        # === PRIMARY METRIC: Logic Gate Extinction Ratio (70 points) ===
-        # Use worst-case scenario for reliable logic operation
-        min_high = min(high_outputs)
-        max_low = max(low_outputs)
+        # === PRIMARY METRIC: Decoder Extinction Ratio (70 points) ===
+        # Use worst-case scenario for reliable decoder operation
+        min_active = min(all_active_outputs)
+        max_inactive = max(all_inactive_outputs)
         
-        # Check for logic separation first
-        logic_separation = min_high - max_low
+        # Check for logic separation
+        logic_separation = min_active - max_inactive
         
         if logic_separation > 0:
-            # Working logic gate - calculate meaningful extinction ratio
-            er_linear = min_high / max(max_low, 0.001)
+            # Working decoder - calculate extinction ratio
+            er_linear = min_active / max(max_inactive, 0.001)
             er_db = 10 * np.log10(er_linear)
             
-            # Score based on extinction ratio (targeting 3-7dB for good logic gates)
+            # Score based on extinction ratio (targeting 3-7dB for good decoders)
             if er_db < 1:
                 er_score = 0
             elif er_db < 3:
@@ -198,38 +182,44 @@ class BayesianLogicGateOptimizer:
             overlap_amount = abs(logic_separation)
             er_score = -30 * min(1.0, overlap_amount / 0.5)  # -30 to 0 based on overlap
         
-        # === SIGNAL STRENGTH (20 points) ===
+        # === SIGNAL STRENGTH (15 points) ===
         # Reward higher absolute output levels for better SNR
-        mean_high = sum(high_outputs) / len(high_outputs)
-        strength_score = 20 * min(1.0, mean_high / 3.0)  # Scale to 3V max
+        mean_active = sum(all_active_outputs) / len(all_active_outputs)
+        strength_score = 15 * min(1.0, mean_active / 3.0)  # Scale to 3V max
         
         # === CONSISTENCY (10 points) ===
         # Reward consistent outputs within each logic state
-        high_std = np.std(high_outputs) if len(high_outputs) > 1 else 0
-        low_std = np.std(low_outputs) if len(low_outputs) > 1 else 0
-        avg_std = (high_std + low_std) / 2
+        active_std = np.std(all_active_outputs) if len(all_active_outputs) > 1 else 0
+        inactive_std = np.std(all_inactive_outputs) if len(all_inactive_outputs) > 1 else 0
+        avg_std = (active_std + inactive_std) / 2
         consistency_score = 10 * np.exp(-avg_std * 5)  # Full points for <0.2V std dev
         
+        # === SELECTIVITY BONUS (5 points) ===
+        # Bonus for each test case where the correct output is highest
+        selectivity_score = 0
+        for result in test_results:
+            expected_idx = result['expected_active']
+            outputs = result['outputs']
+            if outputs[expected_idx] == max(outputs):
+                selectivity_score += 5 / 4  # 1.25 points per correct case
+        
         # === COMBINE SCORES ===
-        total_score = er_score + strength_score + consistency_score
+        total_score = er_score + strength_score + consistency_score + selectivity_score
         
         # Cap at 100 points
         final_score = min(100, max(-50, total_score))
         
         # Debug output for improvements
         if final_score > self.best_score:
-            print(f"  Logic Gate Extinction Ratio: {er_db:.2f}dB (linear: {er_linear:.1f})")
+            print(f"  Decoder Extinction Ratio: {er_db:.2f}dB (linear: {er_linear:.1f})")
             print(f"  Worst-case separation: {logic_separation:.3f}V")
-            print(f"  HIGH outputs: {[f'{h:.3f}V' for h in high_outputs]} (min: {min_high:.3f}V)")
-            print(f"  LOW outputs: {[f'{l:.3f}V' for l in low_outputs]} (max: {max_low:.3f}V)")
-            print(f"  Output pattern: {[f'{o:.3f}V' for o in all_outputs]}")
-            print(f"  Expected pattern: {[d['expected'] for d in output_details]}")
-            
-            # Also show paper's method for comparison
-            sorted_outputs = sorted(all_outputs, reverse=True)
-            paper_er_linear = sorted_outputs[0] / max(sorted_outputs[1], 0.001)
-            paper_er_db = 10 * np.log10(paper_er_linear)
-            print(f"  (Paper's method would be: {paper_er_db:.2f}dB)")
+            print(f"  ACTIVE outputs: {[f'{h:.3f}V' for h in all_active_outputs]} (min: {min_active:.3f}V)")
+            print(f"  INACTIVE outputs: {[f'{l:.3f}V' for l in all_inactive_outputs[:4]]}... (max: {max_inactive:.3f}V)")
+            print(f"  Test patterns:")
+            for i, result in enumerate(test_results):
+                pattern = f"{int(result['input'][0] == V_MAX)}{int(result['input'][1] == V_MAX)}"
+                outputs_str = [f'{o:.3f}' for o in result['outputs']]
+                print(f"    {pattern} -> Ch{result['expected_active']+1}: {outputs_str}")
         
         return final_score
 
@@ -332,28 +322,28 @@ class BayesianLogicGateOptimizer:
         return self.array_to_config(candidates[best_idx])
 
     def initial_sampling(self, n_samples=20):
-        """Initial sampling focused on finding real working logic gates"""
+        """Initial sampling focused on finding working decoders"""
         print(f"Initial sampling with {n_samples} configurations...")
         
         configs = []
         
-        # More diverse starting patterns for real photonic logic gates
+        # More diverse starting patterns for decoder optimization
         good_patterns = [
             {h: 0.1 for h in MODIFIABLE_HEATERS},  # All low
             {h: 1.0 for h in MODIFIABLE_HEATERS},  # Low-medium
             {h: 2.5 for h in MODIFIABLE_HEATERS},  # Medium
             {h: 4.0 for h in MODIFIABLE_HEATERS},  # High
             {h: 4.9 for h in MODIFIABLE_HEATERS},  # Max
-            {h: 0.1 if i < len(MODIFIABLE_HEATERS)//2 else 4.9 for i, h in enumerate(MODIFIABLE_HEATERS)},  # Half min, half max
-            {h: random.choice([0.1, 1.0, 2.0, 3.0, 4.0, 4.9]) for h in MODIFIABLE_HEATERS},  # Random extremes
-            {h: 0.1 + (i % 10) * 0.5 for i, h in enumerate(MODIFIABLE_HEATERS)},  # Wide stepped pattern
+            {h: 0.1 if i < len(MODIFIABLE_HEATERS)//2 else 4.9 for i, h in enumerate(MODIFIABLE_HEATERS)},  # Half-half
+            {h: random.choice([0.1, 1.0, 2.0, 3.0, 4.0, 4.9]) for h in MODIFIABLE_HEATERS},  # Random levels
+            {h: 0.1 + (i % 10) * 0.5 for i, h in enumerate(MODIFIABLE_HEATERS)},  # Stepped pattern
         ]
         
         # Add good patterns
-        for pattern in good_patterns[:min(6, n_samples//3)]:
+        for pattern in good_patterns[:min(8, n_samples//3)]:
             configs.append(pattern)
         
-        # More diverse Latin Hypercube sampling (full voltage range)
+        # Latin Hypercube sampling for remaining
         n_remaining = n_samples - len(configs)
         if n_remaining > 0:
             sampler = qmc.LatinHypercube(d=len(MODIFIABLE_HEATERS), seed=42)
@@ -362,7 +352,6 @@ class BayesianLogicGateOptimizer:
             for sample in samples:
                 config = {}
                 for j, h in enumerate(MODIFIABLE_HEATERS):
-                    # Use full voltage range - we need bigger differences for real logic gates
                     config[h] = V_MIN + sample[j] * (V_MAX - V_MIN)
                 configs.append(config)
         
@@ -386,11 +375,7 @@ class BayesianLogicGateOptimizer:
 
     def bayesian_optimize(self, n_iterations=30, batch_size=3):
         """
-        Efficient Bayesian optimization: Generate many candidates, test only the best
-        
-        Args:
-            n_iterations: Number of optimization cycles
-            batch_size: How many configs to actually test per cycle (keep small!)
+        Efficient Bayesian optimization for decoder
         """
         print(f"\nBayesian optimization for {n_iterations} cycles, testing {batch_size} configs per cycle...")
         
@@ -401,19 +386,17 @@ class BayesianLogicGateOptimizer:
             
             if self.gp is None or len(self.X_evaluated) < 5:
                 print("Insufficient data for GP, using random sampling...")
-                # Random exploration for early iterations
                 configs_to_test = []
                 for _ in range(batch_size):
                     x = np.random.uniform(V_MIN, V_MAX, len(MODIFIABLE_HEATERS))
                     configs_to_test.append(self.array_to_config(x))
             else:
-                # SMART APPROACH: Generate many candidates, predict them all, test only the best
                 print(f"Generating and predicting {batch_size * 500} candidate configurations...")
                 
                 candidates = []
                 
                 # Generate diverse candidate pool
-                for _ in range(batch_size * 500):  # Generate many candidates
+                for _ in range(batch_size * 500):
                     if np.random.random() < 0.7:
                         # 70% random exploration
                         x = np.random.uniform(V_MIN, V_MAX, len(MODIFIABLE_HEATERS))
@@ -430,7 +413,7 @@ class BayesianLogicGateOptimizer:
                 
                 candidates = np.array(candidates)
                 
-                # Predict scores for ALL candidates (this is fast!)
+                # Predict scores for ALL candidates
                 mu, sigma = self.gp.predict(candidates, return_std=True)
                 
                 # UCB acquisition function
@@ -445,19 +428,17 @@ class BayesianLogicGateOptimizer:
                 for i, idx in enumerate(best_indices):
                     print(f"  Candidate {i+1}: Predicted={mu[idx]:.1f}±{sigma[idx]:.1f}, UCB={ucb_scores[idx]:.1f}")
             
-            # NOW test only the selected configurations on hardware
+            # Test selected configurations on hardware
             print(f"Testing {len(configs_to_test)} configurations on hardware...")
             
             for i, config in enumerate(configs_to_test):
                 print(f"\n  Testing candidate {i+1}/{len(configs_to_test)}...")
                 
-                # FIXED: Evaluate configuration first, then check if it's a new best
                 score = self.evaluate_configuration(config)
                 self.add_evaluation(config, score)
                 total_evaluations += 1
                 
-                # Show details if it's a new best
-                if score > self.best_score - 0.01:  # Small tolerance for floating point
+                if score > self.best_score - 0.01:
                     print(f"    🎉 NEW BEST or near-best score!")
                 
                 print(f"    Result: {score:.2f} (best so far: {self.best_score:.2f})")
@@ -466,7 +447,7 @@ class BayesianLogicGateOptimizer:
             print("Updating Gaussian Process with new data...")
             self.fit_gaussian_process()
             
-            # Show efficiency metrics only if we used GP predictions
+            # Show efficiency metrics
             if self.gp is not None and iteration > 0 and 'mu' in locals():
                 predicted_best = max(mu)
                 actual_best = self.best_score
@@ -508,89 +489,84 @@ class BayesianLogicGateOptimizer:
             print(f"Local exploration {i+1}/{n_samples}: Score = {score:.2f}")
 
     def test_final_configuration(self):
-        """Test and display final configuration with logic-relevant extinction ratio"""
+        """Test and display final decoder configuration"""
         if not self.best_config:
             print("No configuration available to test.")
             return False
         
         config = self.best_config
-        print(f"\nTesting final {self.gate_type} gate configuration:")
-
-        all_outputs = []
-        high_outputs = []
-        low_outputs = []
+        print(f"\nTesting final decoder configuration:")
         
-        for input_state in INPUT_COMBINATIONS:
-            current_config = config.copy()
-            current_config[INPUT_HEATERS[0]] = input_state[0]
-            current_config[INPUT_HEATERS[1]] = input_state[1]
+        all_active_outputs = []
+        all_inactive_outputs = []
+        
+        for test_idx, test_config in enumerate(TEST_CONFIGURATIONS):
+            input_a, input_b = test_config
+            expected_active_idx = test_idx
             
+            # Set up test configuration
+            current_config = config.copy()
+            current_config[INPUT_PINS[0]] = input_a
+            current_config[INPUT_PINS[1]] = input_b
+            
+            # Send configuration and measure
             self.send_heater_values(current_config)
             time.sleep(0.25)
-            output_value = self.measure_output()
-            expected = self.truth_table[input_state]
+            outputs = self.measure_outputs()
             
-            all_outputs.append(output_value)
-            if expected:
-                high_outputs.append(output_value)
-            else:
-                low_outputs.append(output_value)
-
-            print(f"Inputs (A, B): {input_state}")
-            print(f"{self.gate_type} Output: {output_value:.4f}V (expect {'HIGH' if expected else 'LOW'})")
-
-        # Calculate both extinction ratios
-        if len(all_outputs) >= 2 and high_outputs and low_outputs:
-            # Logic-relevant extinction ratio (worst-case)
-            min_high = min(high_outputs)
-            max_low = max(low_outputs)
-            logic_separation = min_high - max_low
+            if None in outputs:
+                print(f"Measurement error in test case {test_idx + 1}")
+                continue
             
-            # Paper's extinction ratio (largest vs second-largest)
-            sorted_outputs = sorted(all_outputs, reverse=True)
-            largest = sorted_outputs[0]
-            second_largest = sorted_outputs[1]
+            # Collect data for analysis
+            active_output = outputs[expected_active_idx]
+            inactive_outputs = [outputs[i] for i in range(4) if i != expected_active_idx]
             
-            print(f"\n=== PERFORMANCE METRICS ===")
+            all_active_outputs.append(active_output)
+            all_inactive_outputs.extend(inactive_outputs)
+            
+            # Display results
+            input_pattern = f"{int(input_a == V_MAX)}{int(input_b == V_MAX)}"
+            print(f"\nInput Pattern {input_pattern} (Expected: Ch{expected_active_idx + 1} HIGH):")
+            for i, out in enumerate(outputs):
+                marker = " ← ACTIVE" if i == expected_active_idx else ""
+                print(f"  Channel {i+1}: {out:.4f}V{marker}")
+        
+        # Calculate performance metrics
+        if all_active_outputs and all_inactive_outputs:
+            min_active = min(all_active_outputs)
+            max_inactive = max(all_inactive_outputs)
+            logic_separation = min_active - max_inactive
+            
+            print(f"\n=== DECODER PERFORMANCE METRICS ===")
             
             if logic_separation > 0:
-                logic_er_linear = min_high / max_low
+                logic_er_linear = min_active / max_inactive
                 logic_er_db = 10 * np.log10(logic_er_linear)
-                print(f"✅ WORKING LOGIC GATE!")
-                print(f"Logic Gate Extinction Ratio: {logic_er_db:.2f} dB (worst-case)")
-                print(f"  - Minimum HIGH: {min_high:.4f}V")
-                print(f"  - Maximum LOW:  {max_low:.4f}V")
-                print(f"  - Separation:   {logic_separation:.4f}V")
+                print(f"✅ WORKING DECODER!")
+                print(f"Decoder Extinction Ratio: {logic_er_db:.2f} dB")
+                print(f"  - Minimum ACTIVE:   {min_active:.4f}V")
+                print(f"  - Maximum INACTIVE: {max_inactive:.4f}V")
+                print(f"  - Separation:       {logic_separation:.4f}V")
+                
+                if logic_er_db >= 5.0:
+                    print(f"🎉 Excellent decoder performance!")
+                elif logic_er_db >= 3.0:
+                    print(f"✅ Good decoder performance!")
+                elif logic_er_db >= 1.0:
+                    print(f"⚠️  Marginal decoder performance")
+                else:
+                    print(f"🔧 Poor decoder performance")
             else:
                 print(f"❌ OVERLAPPING LOGIC LEVELS!")
-                print(f"  - Minimum HIGH: {min_high:.4f}V")
-                print(f"  - Maximum LOW:  {max_low:.4f}V")
-                print(f"  - Overlap:      {abs(logic_separation):.4f}V")
+                print(f"  - Minimum ACTIVE:   {min_active:.4f}V")
+                print(f"  - Maximum INACTIVE: {max_inactive:.4f}V")
+                print(f"  - Overlap:          {abs(logic_separation):.4f}V")
             
-            # Show paper's method for comparison
-            if second_largest > 0.001:
-                paper_er_linear = largest / second_largest
-                paper_er_db = 10 * np.log10(paper_er_linear)
-                print(f"\nPaper's Extinction Ratio: {paper_er_db:.2f} dB (reference only)")
-                print(f"  - Largest output:       {largest:.4f}V")
-                print(f"  - Second largest:       {second_largest:.4f}V")
-            
-            print(f"\nHIGH outputs: {[f'{h:.3f}V' for h in high_outputs]}")
-            print(f"LOW outputs:  {[f'{l:.3f}V' for l in low_outputs]}")
-            
-            # Performance assessment
-            if logic_separation > 0:
-                logic_er_db = 10 * np.log10(min_high / max_low)
-                if logic_er_db >= 5.0:
-                    print(f"🎉 Excellent logic gate performance!")
-                elif logic_er_db >= 3.0:
-                    print(f"✅ Good logic gate performance!")
-                elif logic_er_db >= 1.0:
-                    print(f"⚠️  Marginal logic gate performance")
-                else:
-                    print(f"🔧 Poor logic gate performance")
-
-        return None
+            print(f"\nACTIVE outputs:   {[f'{h:.3f}V' for h in all_active_outputs]}")
+            print(f"INACTIVE outputs: {[f'{l:.3f}V' for l in all_inactive_outputs[:8]]}...")
+        
+        return True
 
     def format_config(self):
         """Format final configuration for output"""
@@ -606,7 +582,7 @@ class BayesianLogicGateOptimizer:
 
         # Add fixed first layer values
         for h in FIXED_FIRST_LAYER:
-            if h not in INPUT_HEATERS:
+            if h not in INPUT_PINS:
                 complete_config[h] = 0.01
                 
         return {k: round(float(v), 3) for k, v in complete_config.items()}
@@ -621,21 +597,21 @@ class BayesianLogicGateOptimizer:
             pass
 
     def optimize(self):
-        """Main optimization routine"""
-        print(f"Bayesian optimization for {self.gate_type} gate...")
+        """Main optimization routine for decoder"""
+        print(f"Bayesian optimization for decoder...")
 
         try:
             # Phase 1: Initial sampling
             self.initial_sampling(n_samples=30)
             
             # Phase 2: Bayesian optimization
+            self.bayesian_optimize(n_iterations=15)
+            
+            # Phase 3: Local exploration around best
+            self.explore_around_best(n_samples=8)
+            
+            # Phase 4: Final Bayesian refinement
             self.bayesian_optimize(n_iterations=10)
-            
-            # # Phase 3: Local exploration around best
-            # self.explore_around_best(n_samples=8)
-            
-            # # Phase 4: Final Bayesian refinement
-            # self.bayesian_optimize(n_iterations=10)
             
             # Test final configuration
             self.test_final_configuration()
@@ -657,7 +633,7 @@ class BayesianLogicGateOptimizer:
 
 def main():
     start_time = time.time()
-    optimizer = BayesianLogicGateOptimizer(GATE_TYPE)
+    optimizer = BayesianDecoderOptimizer()
     
     try:
         optimizer.optimize()
