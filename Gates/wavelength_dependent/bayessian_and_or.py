@@ -7,6 +7,10 @@ from scipy.stats import qmc
 import json
 from datetime import datetime
 import math
+from scipy.optimize import minimize
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import RBF, WhiteKernel, ConstantKernel
+import random
 
 # Serial port configuration 
 SERIAL_PORT = 'COM4'
@@ -81,6 +85,15 @@ class DualWavelengthOptimizer:
         for inputs, output in self.truth_table_1552.items():
             print(f"    {inputs} -> {'HIGH' if output else 'LOW'}")
         
+                # Just add these 6 lines to your existing __init__ method:
+        self.X_evaluated = []     # Bayesian memory
+        self.y_1548 = []         # 1548nm scores  
+        self.y_1552 = []         # 1552nm scores
+        self.y_combined = []     # Combined scores
+        self.gp_1548 = None      # Gaussian Process models
+        self.gp_1552 = None
+        self.gp_combined = None
+
         # Initialize hardware connections
         self.scope = self._init_scope()
         self.serial = serial.Serial(SERIAL_PORT, BAUD_RATE)
@@ -101,7 +114,224 @@ class DualWavelengthOptimizer:
                 
         # Results tracking
         self.results_log = []
+
+    def config_to_array(self, config):
+        """Convert config dict to numpy array"""
+        return np.array([config[h] for h in MODIFIABLE_HEATERS])
+
+    def array_to_config(self, x):
+        """Convert numpy array to config dict"""
+        return {h: x[i] for i, h in enumerate(MODIFIABLE_HEATERS)}
+
+    def add_evaluation(self, config, score_1548, score_1552, score_combined):
+        """Add a new evaluation to the Bayesian optimizer dataset"""
+        x = self.config_to_array(config)
+        self.X_evaluated.append(x)
+        self.y_1548.append(score_1548)
+        self.y_1552.append(score_1552)
+        self.y_combined.append(score_combined)
+
+
+    def fit_gaussian_processes(self):
+        """Robust GP fitting with better hyperparameters"""
+        if len(self.X_evaluated) < 5:
+            return
         
+        X = np.array(self.X_evaluated)
+        y = np.array(self.y_combined)
+        
+        print(f"    Fitting GP with {len(X)} points, y range: [{y.min():.1f}, {y.max():.1f}]")
+        
+        # Robust kernel with reasonable bounds
+        kernel = (
+            ConstantKernel(1.0, constant_value_bounds=(0.1, 100)) *
+            RBF(length_scale=1.0, length_scale_bounds=(0.1, 10.0)) +
+            WhiteKernel(noise_level=0.1, noise_level_bounds=(0.01, 10.0))
+        )
+        
+        try:
+            self.gp_combined = GaussianProcessRegressor(
+                kernel=kernel,
+                n_restarts_optimizer=10,  # More restarts for better fit
+                alpha=1e-6,
+                normalize_y=False,  # Don't normalize with small datasets
+                random_state=42
+            )
+            
+            self.gp_combined.fit(X, y)
+            
+            # Test the fit quality
+            y_pred, y_std = self.gp_combined.predict(X[:5], return_std=True)
+            mse = np.mean((y_pred - y[:5])**2)
+            print(f"    GP fit quality (MSE on first 5 points): {mse:.2f}")
+            print(f"    GP fitted successfully!")
+            
+        except Exception as e:
+            print(f"    GP fitting failed: {e}")
+            self.gp_combined = None
+
+    def acquisition_function(self, x):
+        """Upper Confidence Bound - more robust than EI"""
+        if self.gp_combined is None:
+            return random.random()
+        
+        x = x.reshape(1, -1)
+        mu, sigma = self.gp_combined.predict(x, return_std=True)
+        mu, sigma = mu[0], sigma[0]
+        
+        # UCB with high exploration
+        beta = 5.0  # High exploration parameter
+        ucb = mu + beta * sigma
+        
+        # Add small random component to break ties
+        ucb += random.random() * 0.1
+        
+        return ucb
+
+    def suggest_next_config(self):
+        """Proper Bayesian optimization with robust candidate selection"""
+        
+        if len(self.X_evaluated) < 5:
+            # Random until we have enough data
+            x = np.random.uniform(0.1, 4.9, len(MODIFIABLE_HEATERS))
+            return self.array_to_config(x)
+        
+        print("  Bayesian candidate selection...")
+        
+        # Smart candidate generation strategy
+        candidates = []
+        
+        # 1. Random exploration (40%)
+        n_random = 2000
+        random_candidates = np.random.uniform(0.1, 4.9, size=(n_random, len(MODIFIABLE_HEATERS)))
+        candidates.extend(random_candidates)
+        
+        # 2. Local search around best points (40%)
+        best_configs = sorted(zip(self.X_evaluated, self.y_combined), 
+                            key=lambda x: x[1], reverse=True)[:5]
+        
+        n_local = 2000
+        for _ in range(n_local):
+            # Pick a random good config
+            base_x, _ = random.choice(best_configs)
+            # Add Gaussian noise
+            noise = np.random.normal(0, 0.3, len(MODIFIABLE_HEATERS))
+            candidate = np.clip(base_x + noise, 0.1, 4.9)
+            candidates.append(candidate)
+        
+        # 3. Grid-based exploration (20%)
+        n_grid = 1000
+        for _ in range(n_grid):
+            candidate = []
+            for _ in range(len(MODIFIABLE_HEATERS)):
+                # Discrete values
+                val = random.choice([0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5])
+                candidate.append(val)
+            candidates.append(np.array(candidate))
+        
+        # Convert to numpy array
+        candidates = np.array(candidates)
+        
+        # Evaluate acquisition function for all candidates
+        print(f"    Evaluating {len(candidates)} candidates...")
+        acquisition_values = []
+        
+        for i, candidate in enumerate(candidates):
+            acq_val = self.acquisition_function(candidate)
+            acquisition_values.append(acq_val)
+        
+        # Select best candidate
+        best_idx = np.argmax(acquisition_values)
+        best_candidate = candidates[best_idx]
+        best_acq = acquisition_values[best_idx]
+        
+        print(f"    Best acquisition value: {best_acq:.4f}")
+        
+        # Diagnostic info
+        acq_array = np.array(acquisition_values)
+        if acq_array.std() < 1e-6:
+            print(f"    WARNING: All acquisition values identical! Using random fallback.")
+            x = np.random.uniform(0.1, 4.9, len(MODIFIABLE_HEATERS))
+            return self.array_to_config(x)
+        
+        print(f"    Acquisition stats: mean={acq_array.mean():.4f}, std={acq_array.std():.4f}")
+        
+        return self.array_to_config(best_candidate)
+
+    def predict_performance(self, config):
+        """Predict performance at a configuration"""
+        if self.gp_combined is None:
+            return 0, 100  # No prediction possible
+        
+        x = self.config_to_array(config).reshape(1, -1)
+        mu, sigma = self.gp_combined.predict(x, return_std=True)
+        return mu[0], sigma[0]
+    
+
+    def bayesian_optimize(self, n_iterations=25, initial_random=5, batch_size=5):
+        """
+        Bayesian optimization with batched evaluations to minimize laser switching
+        
+        Args:
+            n_iterations: Total number of configurations to evaluate
+            initial_random: Number of random points before starting GP
+            batch_size: Number of configs to evaluate together (reduces laser switching)
+        """
+        print(f"\nBAYESIAN DUAL-WAVELENGTH OPTIMIZATION")
+        print(f"Total iterations: {n_iterations}")
+        print(f"Batch size: {batch_size} (reduces laser switching)")
+        print("=" * 60)
+        
+        configs_to_evaluate = []
+        iteration = 0
+        
+        while iteration < n_iterations:
+            # Collect batch of configurations
+            batch_configs = []
+            
+            for _ in range(min(batch_size, n_iterations - iteration)):
+                if iteration < initial_random:
+                    # Random exploration phase
+                    print(f"Random exploration iteration {iteration+1}")
+                    config = self.array_to_config(
+                        np.random.uniform(0.1, 4.9, len(MODIFIABLE_HEATERS))
+                    )
+                else:
+                    # Bayesian optimization phase
+                    print(f"Bayesian iteration {iteration+1}")
+                    config = self.suggest_next_config()
+                    
+                    # Show prediction
+                    pred_score, uncertainty = self.predict_performance(config)
+                    print(f"  Predicted score: {pred_score:.1f} ± {uncertainty:.1f}")
+                
+                batch_configs.append(config)
+                iteration += 1
+            
+            # Evaluate entire batch (only 2 wavelength switches per batch!)
+            print(f"\nEvaluating batch of {len(batch_configs)} configurations...")
+            results = self.evaluate_configs_dual_wavelength(batch_configs)
+            
+            # Process results and update Bayesian optimizer
+            for i, (config, combined_score, details) in enumerate(results):
+                # Extract individual wavelength scores
+                score_1548 = details['1548nm'][0] if '1548nm' in details else -1000
+                score_1552 = details['1552nm'][0] if '1552nm' in details else -1000
+                
+                # Add to Bayesian optimizer
+                self.add_evaluation(config, score_1548, score_1552, combined_score)
+                
+                print(f"  Config {i+1}: 1548nm={score_1548:.1f}, 1552nm={score_1552:.1f}, Combined={combined_score:.1f}")
+            
+            # Fit GP models after each batch
+            if len(self.X_evaluated) >= 3:
+                print("Updating Gaussian Process models...")
+                self.fit_gaussian_processes()
+        
+        print(f"\nBAYESIAN OPTIMIZATION COMPLETE")
+        print(f"Best combined score: {self.best_score:.1f}")
+        print(f"Total evaluations: {len(self.X_evaluated)}")
+
     def _init_scope(self):
         """Initialize oscilloscope"""
         rm = pyvisa.ResourceManager()
@@ -182,130 +412,131 @@ class DualWavelengthOptimizer:
             print(f"Measurement error: {e}")
             return None
 
-    # def calculate_balanced_score(self, high_outputs, low_outputs, gate_name):
-    #     """Simple, realistic scoring for photonic logic gates
-    #     Focuses on the essentials: clear separation, reliability, and practical thresholds"""
-        
-    #     if not high_outputs or not low_outputs:
-    #         return -50
-        
-    #     min_high = min(high_outputs)
-    #     max_low = max(low_outputs)
-    #     mean_high = sum(high_outputs) / len(high_outputs)
-    #     mean_low = sum(low_outputs) / len(low_outputs)
-        
-    #     # HARD REQUIREMENT: Logic levels must not overlap
-    #     if min_high <= max_low:
-    #         overlap = max_low - min_high
-    #         return -100 - (overlap * 20)  # Severe penalty scaling with overlap
-        
-    #     # 1. SEPARATION QUALITY (60 points) - Most important
-    #     # The gap between worst HIGH and worst LOW
-    #     separation = min_high - max_low
-        
-    #     # Realistic thresholds for photonic devices:
-    #     # 0.3V = barely working, 0.8V = good, 1.5V+ = excellent
-    #     if separation < 0.3:
-    #         separation_score = 0
-    #     elif separation < 0.8:
-    #         separation_score = 30 * (separation - 0.3) / 0.5  # Linear 0→30
-    #     else:
-    #         separation_score = 30 + 30 * (1 - math.exp(-(separation - 0.8)))  # Saturating 30→60
-        
-    #     # 2. SIGNAL QUALITY (25 points)
-    #     # HIGH states should be reasonably high, LOW states reasonably low
-    #     signal_ratio = mean_high / max(mean_low, 0.05)  # Avoid division by zero
-        
-    #     # Realistic ratios: 3x = minimal, 10x = good, 50x+ = excellent
-    #     if signal_ratio < 3:
-    #         signal_score = 0
-    #     elif signal_ratio < 10:
-    #         signal_score = 15 * (signal_ratio - 3) / 7  # Linear 0→15
-    #     else:
-    #         signal_score = 15 + 10 * (1 - math.exp(-(signal_ratio - 10) / 20))  # Saturating 15→25
-        
-    #     # 3. REPEATABILITY (15 points)
-    #     # States should be consistent - simple range check
-    #     high_range = max(high_outputs) - min(high_outputs)
-    #     low_range = max(low_outputs) - min(low_outputs)
-        
-    #     # Accept up to 15% variation within each state
-    #     high_variation = high_range / max(mean_high, 0.1)
-    #     low_variation = low_range / max(mean_low, 0.1)
-    #     avg_variation = (high_variation + low_variation) / 2
-        
-    #     if avg_variation < 0.15:  # Less than 15% variation
-    #         repeatability_score = 15
-    #     elif avg_variation < 0.30:  # 15-30% variation
-    #         repeatability_score = 15 * (0.30 - avg_variation) / 0.15
-    #     else:
-    #         repeatability_score = 0  # Too much variation
-        
-    #     total_score = separation_score + signal_score + repeatability_score
-    #     return min(100, max(0, total_score))
-
     def calculate_balanced_score(self, high_outputs, low_outputs, gate_name):
-        """Scoring optimized for extinction ratio as calculated in the paper
-        Maximizes the ratio of largest output to second-largest output"""
+        """Simple, realistic scoring for photonic logic gates
+        Focuses on the essentials: clear separation, reliability, and practical thresholds"""
         
         if not high_outputs or not low_outputs:
             return -50
         
-        # Combine all outputs and sort to find largest and second-largest
-        all_outputs = high_outputs + low_outputs
-        all_outputs.sort(reverse=True)  # Sort in descending order
-        
-        largest_output = all_outputs[0]
-        second_largest_output = all_outputs[1]
-        
-        # Basic overlap check using traditional method
         min_high = min(high_outputs)
         max_low = max(low_outputs)
+        mean_high = sum(high_outputs) / len(high_outputs)
+        mean_low = sum(low_outputs) / len(low_outputs)
         
         # HARD REQUIREMENT: Logic levels must not overlap
         if min_high <= max_low:
             overlap = max_low - min_high
-            return -100 - (overlap * 20)
+            return -100 - (overlap * 20)  # Severe penalty scaling with overlap
         
-        # 1. EXTINCTION RATIO (50 points) - Primary metric from paper
-        # ER = 10 * log10(largest / second_largest)
-        er_linear = largest_output / max(second_largest_output, 0.001)
-        er_db = 10 * math.log10(er_linear)
+        # 1. SEPARATION QUALITY (60 points) - Most important
+        # The gap between worst HIGH and worst LOW
+        separation = min_high - max_low
         
-        # Paper shows ~4-5 dB is good, 7+ dB is excellent
-        # Map extinction ratio to score: 3dB→10pts, 5dB→30pts, 7dB→45pts, 10dB→50pts
-        if er_db < 3:
-            er_score = 0
-        elif er_db < 5:
-            er_score = 15 * (er_db - 3) / 2  # Linear 0→15
-        elif er_db < 7:
-            er_score = 15 + 20 * (er_db - 5) / 2  # Linear 15→35
+        # Realistic thresholds for photonic devices:
+        # 0.3V = barely working, 0.8V = good, 1.5V+ = excellent
+        if separation < 0.3:
+            separation_score = 0
+        elif separation < 0.8:
+            separation_score = 30 * (separation - 0.3) / 0.5  # Linear 0→30
         else:
-            er_score = 35 + 15 * (1 - math.exp(-(er_db - 7) / 3))  # Saturating 35→50
+            separation_score = 30 + 30 * (1 - math.exp(-(separation - 0.8)))  # Saturating 30→60
         
-        # 2. CLEAR WINNER (30 points) - Ensure one output is clearly dominant
-        # The largest should be significantly larger than the second-largest
-        dominance_ratio = largest_output / max(second_largest_output, 0.001)
+        # 2. SIGNAL QUALITY (25 points)
+        # HIGH states should be reasonably high, LOW states reasonably low
+        signal_ratio = mean_high / max(mean_low, 0.05)  # Avoid division by zero
         
-        # Linear ratio thresholds: 2x = minimal, 5x = good, 10x+ = excellent
-        if dominance_ratio < 2:
-            dominance_score = 0
-        elif dominance_ratio < 5:
-            dominance_score = 15 * (dominance_ratio - 2) / 3  # Linear 0→15
+        # Realistic ratios: 3x = minimal, 10x = good, 50x+ = excellent
+        if signal_ratio < 3:
+            signal_score = 0
+        elif signal_ratio < 10:
+            signal_score = 15 * (signal_ratio - 3) / 7  # Linear 0→15
         else:
-            dominance_score = 15 + 15 * (1 - math.exp(-(dominance_ratio - 5) / 5))  # Saturating 15→30
+            signal_score = 15 + 10 * (1 - math.exp(-(signal_ratio - 10) / 20))  # Saturating 15→25
         
-        # 3. OUTPUT LEVEL QUALITY (20 points) - Ensure reasonable operating levels
-        mean_high = sum(high_outputs) / len(high_outputs)
-        mean_low = sum(low_outputs) / len(low_outputs)
+        # 3. REPEATABILITY (15 points)
+        # States should be consistent - simple range check
+        high_range = max(high_outputs) - min(high_outputs)
+        low_range = max(low_outputs) - min(low_outputs)
         
-        # HIGH should be reasonably high (>1V ideal), LOW should be reasonably low (<1V ideal)
-        high_quality = min(1.0, largest_output / 2.0)  # Normalize to 2V reference
-        low_quality = max(0.0, 1.0 - min(all_outputs) / 1.0)  # Penalize if minimum > 1V
-        level_score = 20 * (high_quality + low_quality) / 2
+        # Accept up to 15% variation within each state
+        high_variation = high_range / max(mean_high, 0.1)
+        low_variation = low_range / max(mean_low, 0.1)
+        avg_variation = (high_variation + low_variation) / 2
         
-        total_score = er_score + dominance_score + level_score
+        if avg_variation < 0.15:  # Less than 15% variation
+            repeatability_score = 15
+        elif avg_variation < 0.30:  # 15-30% variation
+            repeatability_score = 15 * (0.30 - avg_variation) / 0.15
+        else:
+            repeatability_score = 0  # Too much variation
+        
+        total_score = separation_score + signal_score + repeatability_score
         return min(100, max(0, total_score))
+
+    # def calculate_balanced_score(self, high_outputs, low_outputs, gate_name):
+    #     """Scoring optimized for extinction ratio as calculated in the paper
+    #     Maximizes the ratio of largest output to second-largest output"""
+        
+    #     if not high_outputs or not low_outputs:
+    #         return -50
+        
+    #     # Combine all outputs and sort to find largest and second-largest
+    #     all_outputs = high_outputs + low_outputs
+    #     all_outputs.sort(reverse=True)  # Sort in descending order
+        
+    #     largest_output = all_outputs[0]
+    #     second_largest_output = all_outputs[1]
+        
+    #     # Basic overlap check using traditional method
+    #     min_high = min(high_outputs)
+    #     max_low = max(low_outputs)
+        
+    #     # HARD REQUIREMENT: Logic levels must not overlap
+    #     if min_high <= max_low:
+    #         overlap = max_low - min_high
+    #         return -100 - (overlap * 20)
+        
+    #     # 1. EXTINCTION RATIO (50 points) - Primary metric from paper
+    #     # ER = 10 * log10(largest / second_largest)
+    #     er_linear = largest_output / max(second_largest_output, 0.001)
+    #     er_db = 10 * math.log10(er_linear)
+        
+    #     # Paper shows ~4-5 dB is good, 7+ dB is excellent
+    #     # Map extinction ratio to score: 3dB→10pts, 5dB→30pts, 7dB→45pts, 10dB→50pts
+    #     if er_db < 1:
+    #         er_score = 0
+    #     elif er_db < 2:
+    #         er_score = 15 * (er_db - 3) / 2  # Linear 0→15
+    #     elif er_db < 5:
+    #         er_score = 15 + 20 * (er_db - 5) / 2  # Linear 15→35
+    #     else:
+    #         er_score = 35 + 15 * (1 - math.exp(-(er_db - 7) / 3))  # Saturating 35→50
+        
+    #     # 2. CLEAR WINNER (30 points) - Ensure one output is clearly dominant
+    #     # The largest should be significantly larger than the second-largest
+    #     dominance_ratio = largest_output / max(second_largest_output, 0.001)
+        
+    #     # Linear ratio thresholds: 2x = minimal, 5x = good, 10x+ = excellent
+    #     if dominance_ratio < 2:
+    #         dominance_score = 0
+    #     elif dominance_ratio < 5:
+    #         dominance_score = 15 * (dominance_ratio - 2) / 3  # Linear 0→15
+    #     else:
+    #         dominance_score = 15 + 15 * (1 - math.exp(-(dominance_ratio - 5) / 5))  # Saturating 15→30
+        
+    #     # 3. OUTPUT LEVEL QUALITY (20 points) - Ensure reasonable operating levels
+    #     mean_high = sum(high_outputs) / len(high_outputs)
+    #     mean_low = sum(low_outputs) / len(low_outputs)
+        
+    #     # HIGH should be reasonably high (>1V ideal), LOW should be reasonably low (<1V ideal)
+    #     high_quality = min(1.0, largest_output / 2.0)  # Normalize to 2V reference
+    #     low_quality = max(0.0, 1.0 - min(all_outputs) / 1.0)  # Penalize if minimum > 1V
+    #     level_score = 20 * (high_quality + low_quality) / 2
+        
+    #     total_score = er_score + dominance_score + level_score
+    #     return min(100, max(0, total_score))
+     
 
     def evaluate_single_wavelength_batch(self, configs, wavelength, truth_table, gate_name):
         """Evaluate multiple configurations at a single wavelength (batch mode)"""
@@ -402,19 +633,26 @@ class DualWavelengthOptimizer:
             _, score_1548, details_1548 = results_1548[i]
             _, score_1552, details_1552 = results_1552[i]
             
-            # Combined scoring
+            # Combined scoring - MUCH more forgiving
             if score_1548 < -500 or score_1552 < -500:
                 combined_score = -2000
             else:
-                min_score = min(score_1548, score_1552)
-                avg_score = (score_1548 + score_1552) / 2
+                # Reward ANY positive performance
+                positive_1548 = max(0, score_1548)
+                positive_1552 = max(0, score_1552)
                 
-                if min_score < 20:
-                    combined_score = min_score * 0.5
+                if positive_1548 > 0 and positive_1552 > 0:
+                    # Both positive: excellent!
+                    combined_score = (positive_1548 + positive_1552) * 1.5
+                elif positive_1548 > 0 or positive_1552 > 0:
+                    # One positive: still valuable for learning
+                    single_good = max(positive_1548, positive_1552)
+                    combined_score = single_good * 0.6  # Reduced but positive
                 else:
-                    combined_score = avg_score + (min_score * 0.3)
-            
-            # Update best if this is better
+                    # Both negative: take the less bad one
+                    combined_score = max(score_1548, score_1552) * 0.3    
+                # Update best if this is better
+
             if combined_score > self.best_score:
                 self.best_score = combined_score
                 self.best_config = config.copy()
@@ -424,9 +662,7 @@ class DualWavelengthOptimizer:
                     'scores': {
                         '1548nm': score_1548,
                         '1552nm': score_1552,
-                        'combined': combined_score,
-                        'min_score': min_score,
-                        'avg_score': avg_score
+                        'combined': combined_score
                     }
                 }
                 
@@ -801,7 +1037,10 @@ class DualWavelengthOptimizer:
         try:
             # Phase 1: Initial sampling (batch mode)
             print(f"\nPHASE 1: Initial Sampling")
-            self.initial_sampling(n_samples=150)
+            self.initial_sampling(n_samples=30)
+
+            print(f"\nPHASE 2: Bayesian Optimization")
+            self.bayesian_optimize(n_iterations=30, initial_random=0, batch_size=10)
             
             # Phase 2: SPSA optimization (batch mode)
             #print(f"\nPHASE 2: SPSA Optimization")
