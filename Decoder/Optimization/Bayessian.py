@@ -31,11 +31,9 @@ TEST_CONFIGURATIONS = [
 ]
 
 class BayesianDecoderOptimizer:
-    """
-    Optimize a physical decoder using Bayesian Optimization with Gaussian Processes.
-    """
+
     def __init__(self):
-        print("Initializing Bayesian decoder optimization...")
+        print("Initializing improved Bayesian decoder optimization...")
         
         # Bayesian optimization storage
         self.X_evaluated = []  # Configuration vectors
@@ -104,14 +102,7 @@ class BayesianDecoderOptimizer:
             print(f"Measurement error: {e}")
             return [None] * 4
 
-    def evaluate_configuration(self, config):
-        """
-        Decoder scoring function optimized for Bayesian optimization.
-        
-        A decoder should have one HIGH output and three LOW outputs for each input combination.
-        We use extinction ratio concepts adapted for multi-output devices.
-        """
-        
+    def evaluate_configuration(self, config):       
         # Collect all measurements for analysis
         all_active_outputs = []    # Outputs that should be HIGH
         all_inactive_outputs = []  # Outputs that should be LOW
@@ -127,7 +118,7 @@ class BayesianDecoderOptimizer:
             current_config[INPUT_PINS[1]] = input_b
             
             self.send_heater_values(current_config)
-            time.sleep(0.20)
+            time.sleep(0.20)  # Increased settling time for thermal stability
             
             outputs = self.measure_outputs()
             if None in outputs:
@@ -151,75 +142,143 @@ class BayesianDecoderOptimizer:
         if len(all_active_outputs) != 4 or len(all_inactive_outputs) != 12:
             return -500  # Missing measurements
         
-        # === PRIMARY METRIC: Decoder Extinction Ratio (70 points) ===
-        # Use worst-case scenario for reliable decoder operation
+        # === ADAPTIVE ANALYSIS: UNDERSTAND NATURAL SYSTEM BEHAVIOR ===
+        all_outputs = all_active_outputs + all_inactive_outputs
+        
+        # Natural statistics of the system
+        overall_mean = np.mean(all_outputs)
+        overall_std = np.std(all_outputs)
+        overall_min = min(all_outputs)
+        overall_max = max(all_outputs)
+        overall_range = overall_max - overall_min
+        
+        # Statistics for each group
+        active_mean = np.mean(all_active_outputs)
+        inactive_mean = np.mean(all_inactive_outputs)
+        active_std = np.std(all_active_outputs)
+        inactive_std = np.std(all_inactive_outputs)
+        
+        # === METRIC 1: NATURAL SEPARATION (40 points) ===
+        # Reward configurations that naturally separate the two groups
         min_active = min(all_active_outputs)
-        max_inactive = max(all_inactive_outputs)
+        max_inactive = max(all_inactive_outputs)  
+        separation = min_active - max_inactive
         
-        # Check for logic separation
-        logic_separation = min_active - max_inactive
+        # Also consider mean separation for robustness
+        mean_separation = active_mean - inactive_mean
         
-        if logic_separation > 0:
-            # Working decoder - calculate extinction ratio
-            er_linear = min_active / max(max_inactive, 0.001)
-            er_db = 10 * np.log10(er_linear)
+        separation_score = 0
+        if separation > 0:
+            # Working separation - reward based on multiple factors
             
-            # Score based on extinction ratio (targeting 3-7dB for good decoders)
-            if er_db < 1:
-                er_score = 0
-            elif er_db < 3:
-                er_score = 20 * (er_db - 1) / 2  # Linear 0→20 for 1-3dB
-            elif er_db < 5:
-                er_score = 20 + 30 * (er_db - 3) / 2  # Linear 20→50 for 3-5dB
-            elif er_db < 7:
-                er_score = 50 + 15 * (er_db - 5) / 2  # Linear 50→65 for 5-7dB
-            else:
-                er_score = 65 + 5 * (1 - np.exp(-(er_db - 7) / 3))  # Saturating 65→70
+            # Base separation reward (0-25 points)
+            normalized_separation = separation / max(overall_range, 0.1)
+            separation_score += 25 * min(1.0, normalized_separation * 2)
+            
+            # Mean separation bonus (0-10 points) 
+            if mean_separation > 0:
+                normalized_mean_sep = mean_separation / max(overall_range, 0.1)
+                separation_score += 10 * min(1.0, normalized_mean_sep)
+            
+            # Extinction ratio bonus (0-5 points)
+            if max_inactive > 0.001:
+                er_linear = min_active / max_inactive
+                if er_linear > 1.1:  # At least 10% better
+                    er_bonus = 5 * min(1.0, (er_linear - 1.0) / 2.0)
+                    separation_score += er_bonus
         else:
-            # Overlapping logic levels - penalize but provide gradient
-            er_db = 0
-            er_linear = 1
-            overlap_amount = abs(logic_separation)
-            er_score = -30 * min(1.0, overlap_amount / 0.5)  # -30 to 0 based on overlap
+            # Overlapping groups - penalty based on overlap severity
+            overlap = abs(separation)
+            overlap_penalty = min(20, 20 * (overlap / max(overall_range, 0.1)))
+            separation_score = -overlap_penalty
         
-        # === SIGNAL STRENGTH (15 points) ===
-        # Reward higher absolute output levels for better SNR
-        mean_active = sum(all_active_outputs) / len(all_active_outputs)
-        strength_score = 15 * min(1.0, mean_active / 3.0)  # Scale to 3V max
+        # === METRIC 2: POLARIZATION REWARD (30 points) ===
+        # Reward configurations that push outputs toward natural extremes
+        polarization_score = 0
         
-        # === CONSISTENCY (10 points) ===
-        # Reward consistent outputs within each logic state
-        active_std = np.std(all_active_outputs) if len(all_active_outputs) > 1 else 0
-        inactive_std = np.std(all_inactive_outputs) if len(all_inactive_outputs) > 1 else 0
-        avg_std = (active_std + inactive_std) / 2
-        consistency_score = 10 * np.exp(-avg_std * 5)  # Full points for <0.2V std dev
+        # Reward active outputs being high relative to overall distribution
+        for active_val in all_active_outputs:
+            if overall_range > 0:
+                position = (active_val - overall_min) / overall_range
+                if position > 0.5:  # Above median
+                    polarization_score += 3 * (position - 0.5) * 2  # Up to 3 points each
         
-        # === SELECTIVITY BONUS (5 points) ===
-        # Bonus for each test case where the correct output is highest
-        selectivity_score = 0
-        for result in test_results:
-            expected_idx = result['expected_active']
-            outputs = result['outputs']
-            if outputs[expected_idx] == max(outputs):
-                selectivity_score += 5 / 4  # 1.25 points per correct case
+        # Reward inactive outputs being low relative to overall distribution  
+        for inactive_val in all_inactive_outputs:
+            if overall_range > 0:
+                position = (inactive_val - overall_min) / overall_range
+                if position < 0.5:  # Below median
+                    polarization_score += 2 * (0.5 - position) * 2  # Up to 2 points each
+        
+        # Cap polarization score
+        polarization_score = min(30, polarization_score)
+        
+        # === METRIC 3: GROUP CONSISTENCY (20 points) ===
+        # Reward tight grouping within each logic state
+        consistency_score = 0
+        
+        # Active group consistency (0-10 points)
+        if overall_range > 0:
+            active_relative_std = active_std / overall_range
+            consistency_score += 10 * np.exp(-active_relative_std * 10)
+        
+        # Inactive group consistency (0-10 points)  
+        if overall_range > 0:
+            inactive_relative_std = inactive_std / overall_range
+            consistency_score += 10 * np.exp(-inactive_relative_std * 10)
+        
+        # === METRIC 4: BIMODAL DISTRIBUTION REWARD (10 points) ===
+        # Reward configurations that create two distinct peaks
+        bimodal_score = 0
+        
+        # Check if the two groups are well-separated in the distribution
+        if len(all_outputs) >= 8:  # Need enough samples
+            # Simple bimodality test: gap between groups vs within-group spread
+            group_gap = abs(active_mean - inactive_mean)
+            combined_spread = (active_std + inactive_std) / 2
+            
+            if combined_spread > 0:
+                bimodal_ratio = group_gap / combined_spread
+                bimodal_score = 10 * min(1.0, bimodal_ratio / 3.0)  # Full points for 3:1 ratio
         
         # === COMBINE SCORES ===
-        total_score = er_score + strength_score + consistency_score + selectivity_score
+        total_score = separation_score + polarization_score + consistency_score + bimodal_score
         
-        # Cap at 100 points
+        # Apply gentle bounds (wider range for more exploration)
         final_score = min(100, max(-50, total_score))
         
-        # Debug output for improvements
+        # === DETAILED DEBUG OUTPUT FOR IMPROVEMENTS ===
         if final_score > self.best_score:
-            print(f"  Decoder Extinction Ratio: {er_db:.2f}dB (linear: {er_linear:.1f})")
-            print(f"  Worst-case separation: {logic_separation:.3f}V")
-            print(f"  ACTIVE outputs: {[f'{h:.3f}V' for h in all_active_outputs]} (min: {min_active:.3f}V)")
-            print(f"  INACTIVE outputs: {[f'{l:.3f}V' for l in all_inactive_outputs[:4]]}... (max: {max_inactive:.3f}V)")
-            print(f"  Test patterns:")
+            print(f"  === NEW BEST CONFIGURATION ===")
+            print(f"  Final Score: {final_score:.2f}")
+            print(f"    Separation Score: {separation_score:.1f}/40")
+            print(f"    Polarization Score: {polarization_score:.1f}/30") 
+            print(f"    Consistency Score: {consistency_score:.1f}/20")
+            print(f"    Bimodal Score: {bimodal_score:.1f}/10")
+            print(f"  ")
+            print(f"  Natural System Analysis:")
+            print(f"    Overall range: {overall_min:.3f}V to {overall_max:.3f}V ({overall_range:.3f}V span)")
+            print(f"    System center: {overall_mean:.3f}V ± {overall_std:.3f}V")
+            print(f"  ")
+            print(f"  Group Separation:")
+            print(f"    ACTIVE: {active_mean:.3f}V ± {active_std:.3f}V  (range: {min(all_active_outputs):.3f}-{max(all_active_outputs):.3f}V)")
+            print(f"    INACTIVE: {inactive_mean:.3f}V ± {inactive_std:.3f}V  (range: {min(all_inactive_outputs):.3f}-{max(all_inactive_outputs):.3f}V)")
+            print(f"    Worst-case separation: {separation:.3f}V")
+            print(f"    Mean separation: {mean_separation:.3f}V")
+            if max_inactive > 0.001:
+                er_linear = min_active / max_inactive
+                print(f"    Extinction ratio: {10*np.log10(er_linear):.2f}dB (linear: {er_linear:.2f})")
+            print(f"  ")
+            print(f"  Voltage Distributions:")
+            print(f"    ACTIVE outputs: {[f'{v:.3f}V' for v in all_active_outputs]}")
+            print(f"    INACTIVE outputs: {[f'{v:.3f}V' for v in all_inactive_outputs[:6]]}... (showing first 6)")
+            print(f"  ")
+            print(f"  Test Pattern Results:")
             for i, result in enumerate(test_results):
                 pattern = f"{int(result['input'][0] == V_MAX)}{int(result['input'][1] == V_MAX)}"
                 outputs_str = [f'{o:.3f}' for o in result['outputs']]
-                print(f"    {pattern} -> Ch{result['expected_active']+1}: {outputs_str}")
+                expected_ch = result['expected_active'] + 1
+                print(f"    {pattern} -> Expected Ch{expected_ch}: {outputs_str}")
         
         return final_score
 
@@ -245,11 +304,10 @@ class BayesianDecoderOptimizer:
         
         print(f"    Fitting GP with {len(X)} points, score range: [{y.min():.1f}, {y.max():.1f}]")
         
-        # Robust kernel for photonic device optimization
-        kernel = (
+        kernel = (  
             ConstantKernel(1.0, constant_value_bounds=(0.1, 100)) *
-            RBF(length_scale=1.0, length_scale_bounds=(0.1, 10.0)) +
-            WhiteKernel(noise_level=0.5, noise_level_bounds=(0.01, 10.0))
+            RBF(length_scale=1.0, length_scale_bounds=(0.1, 50.0)) +
+            WhiteKernel(noise_level=0.1, noise_level_bounds=(0.00001, 10.0))
         )
         
         try:
@@ -270,8 +328,8 @@ class BayesianDecoderOptimizer:
             self.gp = None
             return False
 
-    def acquisition_function(self, x):
-        """Upper Confidence Bound acquisition function"""
+
+    def acquisition_function(self, x, beta):  # Pass beta as parameter
         if self.gp is None:
             return random.random()
         
@@ -279,55 +337,16 @@ class BayesianDecoderOptimizer:
         mu, sigma = self.gp.predict(x, return_std=True)
         mu, sigma = mu[0], sigma[0]
         
-        # UCB with exploration parameter
-        beta = 3.0  # Exploration vs exploitation balance
-        ucb = mu + beta * sigma
-        
+        ucb = mu + beta * sigma  # Use provided beta
         return ucb
 
-    def suggest_next_config(self):
-        """Suggest next configuration using Bayesian optimization"""
-        if self.gp is None or len(self.X_evaluated) < 5:
-            # Random exploration for initial points
-            x = np.random.uniform(V_MIN, V_MAX, len(MODIFIABLE_HEATERS))
-            return self.array_to_config(x)
-        
-        # Generate candidate configurations
-        n_candidates = 3000
-        
-        # Mix of random and local search candidates
-        candidates = []
-        
-        # 70% random exploration
-        n_random = int(0.7 * n_candidates)
-        random_candidates = np.random.uniform(V_MIN, V_MAX, size=(n_random, len(MODIFIABLE_HEATERS)))
-        candidates.extend(random_candidates)
-        
-        # 30% local search around best configurations
-        n_local = n_candidates - n_random
-        if self.best_config:
-            for _ in range(n_local):
-                base_x = self.config_to_array(self.best_config)
-                noise = np.random.normal(0, 0.5, len(MODIFIABLE_HEATERS))
-                candidate = np.clip(base_x + noise, V_MIN, V_MAX)
-                candidates.append(candidate)
-        
-        candidates = np.array(candidates)
-        
-        # Evaluate acquisition function
-        acquisition_values = [self.acquisition_function(c) for c in candidates]
-        
-        # Select best candidate
-        best_idx = np.argmax(acquisition_values)
-        return self.array_to_config(candidates[best_idx])
-
-    def initial_sampling(self, n_samples=20):
-        """Initial sampling focused on finding working decoders"""
+    def initial_sampling(self, n_samples=50):
+        """Improved initial sampling with more diverse patterns"""
         print(f"Initial sampling with {n_samples} configurations...")
         
         configs = []
         
-        # More diverse starting patterns for decoder optimization
+        # Diverse starting patterns based on successful logic gate approach
         good_patterns = [
             {h: 0.1 for h in MODIFIABLE_HEATERS},  # All low
             {h: 1.0 for h in MODIFIABLE_HEATERS},  # Low-medium
@@ -337,10 +356,13 @@ class BayesianDecoderOptimizer:
             {h: 0.1 if i < len(MODIFIABLE_HEATERS)//2 else 4.9 for i, h in enumerate(MODIFIABLE_HEATERS)},  # Half-half
             {h: random.choice([0.1, 1.0, 2.0, 3.0, 4.0, 4.9]) for h in MODIFIABLE_HEATERS},  # Random levels
             {h: 0.1 + (i % 10) * 0.5 for i, h in enumerate(MODIFIABLE_HEATERS)},  # Stepped pattern
+            # Add more extreme patterns
+            {h: random.choice([0.1, 4.9]) for h in MODIFIABLE_HEATERS},  # Binary extremes
+            {h: 0.1 + (i / len(MODIFIABLE_HEATERS)) * 4.8 for i, h in enumerate(MODIFIABLE_HEATERS)},  # Linear gradient
         ]
         
-        # Add good patterns
-        for pattern in good_patterns[:min(8, n_samples//3)]:
+        # Add good patterns (more of them)
+        for pattern in good_patterns[:min(10, n_samples//3)]:
             configs.append(pattern)
         
         # Latin Hypercube sampling for remaining
@@ -363,20 +385,15 @@ class BayesianDecoderOptimizer:
             
             if score > 10:  # Consider anything >10 as "working"
                 working_configs += 1
-                print(f"Config {i+1}/{n_samples}: Score = {score:.2f} ✓")
+                print(f"Config {i+1}/{n_samples}: Score = {score:.2f}")
             else:
                 print(f"Config {i+1}/{n_samples}: Score = {score:.2f}")
         
         print(f"Initial sampling complete. Working configs: {working_configs}/{len(self.y_evaluated)}")
-        if working_configs == 0:
-            print("WARNING: No working configurations found! May need to adjust voltage ranges or hardware.")
-        
         return working_configs
 
-    def bayesian_optimize(self, n_iterations=30, batch_size=3):
-        """
-        Efficient Bayesian optimization for decoder
-        """
+    def bayesian_optimize(self, n_iterations=15, batch_size=4):
+        
         print(f"\nBayesian optimization for {n_iterations} cycles, testing {batch_size} configs per cycle...")
         
         total_evaluations = 0
@@ -415,16 +432,29 @@ class BayesianDecoderOptimizer:
                 
                 # Predict scores for ALL candidates
                 mu, sigma = self.gp.predict(candidates, return_std=True)
+                                
+                if self.best_score < 0:
+                    beta = 6.0    # High exploration when stuck in bad region
+                elif self.best_score < 15:
+                    beta = 5.0    # Moderate exploration for early progress  
+                elif self.best_score < 40:
+                    beta = 4.0    # Balanced exploration/exploitation
+                elif self.best_score < 70:
+                    beta = 3    # More exploitation as you find good solutions
+                elif self.best_score < 80:
+                    beta = 2.5    # Focus on refinement
+                else:
+                    beta = 2    # Fine-tuning for excellent solutions
                 
-                # UCB acquisition function
-                beta = 3.0
+                # Vectorized (much faster)
                 ucb_scores = mu + beta * sigma
+                
+                print(f"Selected top {batch_size} candidates (β={beta}):")
                 
                 # Select the top candidates to actually test
                 best_indices = np.argsort(ucb_scores)[-batch_size:]
                 configs_to_test = [self.array_to_config(candidates[i]) for i in best_indices]
                 
-                print(f"Selected top {batch_size} candidates:")
                 for i, idx in enumerate(best_indices):
                     print(f"  Candidate {i+1}: Predicted={mu[idx]:.1f}±{sigma[idx]:.1f}, UCB={ucb_scores[idx]:.1f}")
             
@@ -457,43 +487,46 @@ class BayesianDecoderOptimizer:
         
         print(f"\nBayesian optimization complete!")
         print(f"Total hardware evaluations: {total_evaluations}")
-        if n_iterations > 0 and batch_size > 0:
-            total_candidates = n_iterations * batch_size * 500
-            if total_candidates > 0:
-                print(f"Efficiency: {total_evaluations}/{total_candidates} = {total_evaluations/total_candidates:.1%} of candidates tested")
         print(f"Final best score: {self.best_score:.2f}")
 
-    def explore_around_best(self, n_samples=5):
-        """Local exploration around best configuration"""
+    def explore_around_best(self):
+        """Enhanced local exploration (your most successful strategy)"""
         if not self.best_config:
             print("No best configuration available for local exploration.")
             return
         
-        print(f"\nLocal exploration with {n_samples} configurations...")
+        print(f"\nLocal exploration...")
         base_config = self.best_config.copy()
         
-        for i in range(n_samples):
-            # Create perturbed version of best config
-            new_config = base_config.copy()
+        # Multiple exploration strategies
+        strategies = [
+            {'name': 'coarse', 'range': 0.8, 'fraction': 0.4, 'samples': 7},    # Coarse search
+            {'name': 'medium', 'range': 0.3, 'fraction': 0.3, 'samples': 7},   # Medium search
+            {'name': 'fine', 'range': 0.1, 'fraction': 0.2, 'samples': 7},      # Fine tuning
+        ]
+        
+        for strategy in strategies:
+            print(f"\n  {strategy['name'].title()} local exploration (±{strategy['range']}V):")
             
-            # Perturb random subset of heaters
-            for h in random.sample(MODIFIABLE_HEATERS, max(1, len(MODIFIABLE_HEATERS) // 3)):
-                current = new_config.get(h, 0.1)
-                perturbation = random.uniform(-0.3, 0.3)
-                new_config[h] = max(V_MIN, min(V_MAX, current + perturbation))
-            
-            # Evaluate
-            score = self.evaluate_configuration(new_config)
-            self.add_evaluation(new_config, score)
-            
-            print(f"Local exploration {i+1}/{n_samples}: Score = {score:.2f}")
+            for i in range(strategy['samples']):
+                new_config = base_config.copy()
+                
+                # Perturb specified fraction of heaters
+                n_perturb = max(1, int(len(MODIFIABLE_HEATERS) * strategy['fraction']))
+                heaters_to_perturb = random.sample(MODIFIABLE_HEATERS, n_perturb)
+                
+                for h in heaters_to_perturb:
+                    current = new_config.get(h, 0.1)
+                    perturbation = random.uniform(-strategy['range'], strategy['range'])
+                    new_config[h] = max(V_MIN, min(V_MAX, current + perturbation))
+                
+                score = self.evaluate_configuration(new_config)
+                self.add_evaluation(new_config, score)
+                
+                print(f"    {strategy['name']} {i+1}/{strategy['samples']}: Score = {score:.2f}")
 
     def test_final_configuration(self):
-        """Test and display final decoder configuration"""
-        if not self.best_config:
-            print("No configuration available to test.")
-            return False
-        
+       
         config = self.best_config
         print(f"\nTesting final decoder configuration:")
         
@@ -550,15 +583,15 @@ class BayesianDecoderOptimizer:
                 print(f"  - Separation:       {logic_separation:.4f}V")
                 
                 if logic_er_db >= 5.0:
-                    print(f"🎉 Excellent decoder performance!")
+                    print(f"Excellent decoder performance!")
                 elif logic_er_db >= 3.0:
-                    print(f"✅ Good decoder performance!")
+                    print(f"Good decoder performance!")
                 elif logic_er_db >= 1.0:
-                    print(f"⚠️  Marginal decoder performance")
+                    print(f"Marginal decoder performance")
                 else:
-                    print(f"🔧 Poor decoder performance")
+                    print(f"Poor decoder performance")
             else:
-                print(f"❌ OVERLAPPING LOGIC LEVELS!")
+                print(f"OVERLAPPING LOGIC LEVELS!")
                 print(f"  - Minimum ACTIVE:   {min_active:.4f}V")
                 print(f"  - Maximum INACTIVE: {max_inactive:.4f}V")
                 print(f"  - Overlap:          {abs(logic_separation):.4f}V")
@@ -588,48 +621,45 @@ class BayesianDecoderOptimizer:
         return {k: round(float(v), 3) for k, v in complete_config.items()}
 
     def cleanup(self):
-        """Clean up hardware connections"""
-        try:
-            self.serial.close()
-            self.scope.close()
-            print("Connections closed.")
-        except:
-            pass
+        self.serial.close()
+        self.scope.close()
+        print("Connections closed.")
+ 
 
     def optimize(self):
-        """Main optimization routine for decoder"""
-        print(f"Bayesian optimization for decoder...")
-
-        try:
-            # Phase 1: Initial sampling
-            self.initial_sampling(n_samples=30)
-            
-            # Phase 2: Bayesian optimization
-            self.bayesian_optimize(n_iterations=15)
-            
-            # Phase 3: Local exploration around best
-            self.explore_around_best(n_samples=8)
-            
-            # Phase 4: Final Bayesian refinement
-            self.bayesian_optimize(n_iterations=10)
-            
-            # Test final configuration
-            self.test_final_configuration()
-            
-            print(f"\nOptimization complete!")
-            print(f"Best score: {self.best_score:.2f}")
-            print(f"Total evaluations: {len(self.y_evaluated)}")
-            print("\nFinal heater configuration:")
-            print(self.format_config())
-            
-            return self.best_config, self.best_score
-            
-        except Exception as e:
-            print(f"Optimization failed: {e}")
-            return None, -1
+        self.initial_sampling(n_samples=15)
         
-        finally:
-            self.cleanup()
+        self.bayesian_optimize(n_iterations=10)  # Reduced iterations
+    
+        self.explore_around_best()  # More local exploration
+    
+        self.bayesian_optimize(n_iterations=15)  # Reduced iterations
+    
+        self.explore_around_best()  # More local exploration
+
+        self.bayesian_optimize(n_iterations=20)  # Reduced iterations
+    
+        self.explore_around_best()  # More local exploration
+
+        if self.best_score > 60:
+            self.bayesian_optimize(n_iterations=20)  # Reduced iterations        
+            self.explore_around_best()  # More local exploration
+    
+        if self.best_score > 80:
+            self.bayesian_optimize(n_iterations=20)  # Reduced iterations        
+            self.explore_around_best()  # More local exploration
+    
+
+        self.test_final_configuration()
+        
+        print(f"\nOptimization complete!")
+        print(f"Best score: {self.best_score:.2f}")
+        print(f"Total evaluations: {len(self.y_evaluated)}")
+        print("\nFinal heater configuration:")
+        print(self.format_config())
+        
+        return self.best_config, self.best_score
+
 
 def main():
     start_time = time.time()
