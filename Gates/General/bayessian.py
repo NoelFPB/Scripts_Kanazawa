@@ -12,7 +12,7 @@ SERIAL_PORT = 'COM4'
 BAUD_RATE = 115200
 
 # === GATE CONFIGURATION ===
-GATE_TYPE = "NAND"  # Logic gate type to optimize (AND, OR, NAND, NOR, XOR, XNOR)
+GATE_TYPE = "AND"  # Logic gate type to optimize (AND, OR, NAND, NOR, XOR, XNOR)
 INPUT_HEATERS = [36, 37]  # Heaters for input A and B
 
 # Voltage definitions
@@ -216,7 +216,7 @@ class BayesianLogicGateOptimizer:
         # Extra penalty for HIGH output variation
         if len(high_outputs) > 1:
             high_range = max(high_outputs) - min(high_outputs)
-            high_consistency_penalty = -20 * min(1.0, high_range / 2.0)  # -20 points for 2V+ variation
+            high_consistency_penalty = -20 * min(1.0, high_range / 1.0)  # -20 points for 2V+ variation
             total_score += high_consistency_penalty
         # === COMBINE SCORES ===
         
@@ -232,12 +232,6 @@ class BayesianLogicGateOptimizer:
             print(f"  LOW outputs: {[f'{l:.3f}V' for l in low_outputs]} (max: {max_low:.3f}V)")
             print(f"  Output pattern: {[f'{o:.3f}V' for o in all_outputs]}")
             print(f"  Expected pattern: {[d['expected'] for d in output_details]}")
-            
-            # Also show paper's method for comparison
-            sorted_outputs = sorted(all_outputs, reverse=True)
-            paper_er_linear = sorted_outputs[0] / max(sorted_outputs[1], 0.001)
-            paper_er_db = 10 * np.log10(paper_er_linear)
-            print(f"  (Paper's method would be: {paper_er_db:.2f}dB)")
         
         return final_score
 
@@ -554,10 +548,6 @@ class BayesianLogicGateOptimizer:
             max_low = max(low_outputs)
             logic_separation = min_high - max_low
             
-            # Paper's extinction ratio (largest vs second-largest)
-            sorted_outputs = sorted(all_outputs, reverse=True)
-            largest = sorted_outputs[0]
-            second_largest = sorted_outputs[1]
             
             print(f"\n=== PERFORMANCE METRICS ===")
             
@@ -574,14 +564,6 @@ class BayesianLogicGateOptimizer:
                 print(f"  - Minimum HIGH: {min_high:.4f}V")
                 print(f"  - Maximum LOW:  {max_low:.4f}V")
                 print(f"  - Overlap:      {abs(logic_separation):.4f}V")
-            
-            # Show paper's method for comparison
-            if second_largest > 0.001:
-                paper_er_linear = largest / second_largest
-                paper_er_db = 10 * np.log10(paper_er_linear)
-                print(f"\nPaper's Extinction Ratio: {paper_er_db:.2f} dB (reference only)")
-                print(f"  - Largest output:       {largest:.4f}V")
-                print(f"  - Second largest:       {second_largest:.4f}V")
             
             print(f"\nHIGH outputs: {[f'{h:.3f}V' for h in high_outputs]}")
             print(f"LOW outputs:  {[f'{l:.3f}V' for l in low_outputs]}")

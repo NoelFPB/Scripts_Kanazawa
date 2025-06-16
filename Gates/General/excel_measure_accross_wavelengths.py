@@ -35,18 +35,18 @@ INPUT_LABELS = ["00", "01", "10", "11"]
 
 # Gate type mapping for clean output
 GATE_TYPE_MAPPING = {
-    "00": "Gate_00",  # You can customize these labels
+    "00": "Gate_00",
     "01": "Gate_01",
     "10": "Gate_10", 
     "11": "Gate_11"
 }
 
 # Measurement parameters
-NUM_MEASUREMENTS_PER_POINT = 3  # Average multiple measurements for accuracy
+NUM_MEASUREMENTS_PER_POINT = 3  # Number of measurements to average (no std dev displayed)
 LASER_SETTLING_TIME = 1       # Time to wait after wavelength change (seconds)
-LASER_STARTUP_TIME = 15         # Time to wait for laser to turn on and stabilize (seconds)
-HEATER_SETTLING_TIME = 0.3      # Time to wait after heater change (seconds)
-FINAL_SETTLING_TIME = 0.1         # Additional settling before measurements (seconds)
+LASER_STARTUP_TIME = 15       # Time to wait for laser to turn on and stabilize (seconds)
+HEATER_SETTLING_TIME = 0.3    # Time to wait after heater change (seconds)
+FINAL_SETTLING_TIME = 0.1     # Additional settling before measurements (seconds)
 
 class WavelengthSweepMeasurement:
     def __init__(self, base_config=None):   
@@ -182,25 +182,24 @@ class WavelengthSweepMeasurement:
         self.serial.reset_output_buffer()
     
     def measure_output(self):
-        """Measure the logic gate output voltage from oscilloscope"""
+        """Measure the logic gate output voltage from oscilloscope - average of multiple measurements"""
         measurements = []
         
         for i in range(NUM_MEASUREMENTS_PER_POINT):
             try:
                 value = float(self.scope.query(':MEASure:STATistic:ITEM? CURRent,VMAX,CHANnel2'))
                 measurements.append(value)
-                if NUM_MEASUREMENTS_PER_POINT > 1:
+                if NUM_MEASUREMENTS_PER_POINT > 1 and i < NUM_MEASUREMENTS_PER_POINT - 1:
                     time.sleep(0.1)  # Brief delay between measurements
             except Exception as e:
                 print(f"    Measurement {i+1} failed: {e}")
-                return None
+                continue
         
         if measurements:
             avg_value = sum(measurements) / len(measurements)
-            std_dev = np.std(measurements) if len(measurements) > 1 else 0
-            return round(avg_value, 5), round(std_dev, 5)
+            return round(avg_value, 5)
         else:
-            return None, None
+            return None
     
     def measure_single_wavelength(self, wavelength):
         """Measure all input combinations at a single wavelength"""
@@ -238,24 +237,20 @@ class WavelengthSweepMeasurement:
             self.send_heater_values(current_config)
             time.sleep(HEATER_SETTLING_TIME)
             
-            # Measure output
-            output_avg, output_std = self.measure_output()
+            # Measure output - simplified, single measurement
+            output_value = self.measure_output()
             
-            if output_avg is not None:
-                print(f"{output_avg:.4f}V (±{output_std:.4f}V)")
+            if output_value is not None:
+                print(f"{output_value:.4f}V")
                 wavelength_results['measurements'][input_label] = {
                     'input_voltages': input_combo,
-                    'output_voltage_avg': output_avg,
-                    'output_voltage_std': output_std,
-                    'num_measurements': NUM_MEASUREMENTS_PER_POINT
+                    'output_voltage': output_value
                 }
             else:
                 print("FAILED")
                 wavelength_results['measurements'][input_label] = {
                     'input_voltages': input_combo,
-                    'output_voltage_avg': None,
-                    'output_voltage_std': None,
-                    'num_measurements': 0
+                    'output_voltage': None
                 }
         
         self.turn_laser_off()
@@ -315,13 +310,11 @@ class WavelengthSweepMeasurement:
             
             if self.results:
                 self.save_results_clean_format()
-                self.save_results_detailed()  # Keep detailed results as backup
                 self.print_summary()
     
     def save_results_clean_format(self):
-        """Save results in clean format matching the target Excel style"""
+        """Save results in clean format - fixed Excel formatting"""
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        excel_filename = f"wavelength_sweep_clean_{timestamp}.xlsx"
         
         try:
             # Get wavelength list for column headers
@@ -348,8 +341,8 @@ class WavelengthSweepMeasurement:
                     for result in self.results:
                         if result['wavelength'] == wavelength:
                             if (input_label in result['measurements'] and 
-                                result['measurements'][input_label]['output_voltage_avg'] is not None):
-                                measurement_value = round(result['measurements'][input_label]['output_voltage_avg'], 3)
+                                result['measurements'][input_label]['output_voltage'] is not None):
+                                measurement_value = round(result['measurements'][input_label]['output_voltage'], 3)
                             break
                     
                     # Use wavelength as column name
@@ -360,38 +353,44 @@ class WavelengthSweepMeasurement:
             # Create DataFrame
             clean_df = pd.DataFrame(clean_data)
             
-            # Save to Excel with clean formatting
-            with pd.ExcelWriter(excel_filename, engine='openpyxl') as writer:
-                clean_df.to_excel(writer, sheet_name='Clean_Results', index=False)
+            # Try to save Excel with simplified formatting
+            try:
+                excel_filename = f"wavelength_sweep_clean_{timestamp}.xlsx"
+                with pd.ExcelWriter(excel_filename, engine='openpyxl') as writer:
+                    clean_df.to_excel(writer, sheet_name='Clean_Results', index=False)
                 
-                # Get the workbook and worksheet for formatting
-                workbook = writer.book
-                worksheet = writer.sheets['Clean_Results']
+                print(f"Clean Excel results saved to: {excel_filename}")
                 
-                # Format headers
-                for col_num, column_title in enumerate(clean_df.columns, 1):
-                    cell = worksheet.cell(row=1, column=col_num)
-                    cell.font = workbook.create_font(bold=True)
-                
-                # Auto-adjust column widths
-                for column in worksheet.columns:
-                    max_length = 0
-                    column_letter = column[0].column_letter
-                    for cell in column:
-                        try:
-                            if len(str(cell.value)) > max_length:
-                                max_length = len(str(cell.value))
-                        except:
-                            pass
-                    adjusted_width = min(max_length + 2, 15)
-                    worksheet.column_dimensions[column_letter].width = adjusted_width
+            except Exception as excel_error:
+                print(f"Excel export failed: {excel_error}, saving as CSV instead...")
             
-            print(f"Clean Excel results saved to: {excel_filename}")
-            
-            # Also save as CSV for easy copying
+            # Always save CSV (as primary or backup)
             csv_filename = f"wavelength_sweep_clean_{timestamp}.csv"
             clean_df.to_csv(csv_filename, index=False)
             print(f"Clean CSV results saved to: {csv_filename}")
+            
+            # Print copy-paste ready format
+            print(f"\n{'='*80}")
+            print(f"COPY-PASTE READY FORMAT (Tab-separated for Excel):")
+            print(f"{'='*80}")
+            
+            # Create tab-separated format
+            headers = ["Gate", "A", "B"] + [str(wl) for wl in wavelengths]
+            print("\t".join(headers))
+            
+            for _, row in clean_df.iterrows():
+                values = []
+                for col in headers:
+                    val = row[col]
+                    if pd.isna(val) or val is None:
+                        values.append("")
+                    else:
+                        values.append(str(val))
+                print("\t".join(values))
+            
+            print(f"\n{'='*80}")
+            print("Copy the lines above and paste directly into Excel!")
+            print(f"{'='*80}")
             
             # Print preview of clean data
             print(f"\nClean data preview:")
@@ -401,96 +400,7 @@ class WavelengthSweepMeasurement:
                 print(f"... (showing first 8 columns, total: {len(clean_df.columns)} columns)")
             
         except Exception as e:
-            print(f"Error saving clean format Excel file: {e}")
-    
-    def save_results_detailed(self):
-        """Save detailed results (original format) as backup"""
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        excel_filename = f"wavelength_sweep_detailed_{timestamp}.xlsx"
-        
-        try:
-            # Create Excel writer object
-            with pd.ExcelWriter(excel_filename, engine='openpyxl') as writer:
-                
-                # Sheet 1: Measurement Info
-                info_data = {
-                    'Parameter': [
-                        'Timestamp',
-                        'Wavelength Start (nm)',
-                        'Wavelength End (nm)',
-                        'Wavelength Step (nm)',
-                        'Total Wavelengths',
-                        'Input Combinations',
-                        'Laser Settling Time (s)',
-                        'Heater Settling Time (s)',
-                        'Measurements Per Point',
-                        'V_MIN (V)',
-                        'V_MAX (V)',
-                        'Input Heaters',
-                        'Serial Port',
-                        'Baud Rate',
-                        'Laser Address'
-                    ],
-                    'Value': [
-                        datetime.now().isoformat(),
-                        WAVELENGTH_START,
-                        WAVELENGTH_END,
-                        WAVELENGTH_STEP,
-                        len(self.get_wavelength_list()),
-                        str(INPUT_COMBINATIONS),
-                        LASER_SETTLING_TIME,
-                        HEATER_SETTLING_TIME,
-                        NUM_MEASUREMENTS_PER_POINT,
-                        V_MIN,
-                        V_MAX,
-                        str(INPUT_HEATERS),
-                        SERIAL_PORT,
-                        BAUD_RATE,
-                        LASER_ADDRESS
-                    ]
-                }
-                info_df = pd.DataFrame(info_data)
-                info_df.to_excel(writer, sheet_name='Measurement_Info', index=False)
-                
-                # Sheet 2: Base Configuration
-                base_config_data = {
-                    'Heater_ID': list(self.base_config.keys()),
-                    'Voltage_V': list(self.base_config.values())
-                }
-                base_config_df = pd.DataFrame(base_config_data)
-                base_config_df.to_excel(writer, sheet_name='Base_Configuration', index=False)
-                
-                # Sheet 3: Main Results Table
-                main_data = []
-                for result in self.results:
-                    row = {
-                        'Wavelength_nm': result['wavelength'],
-                        'Timestamp': result['timestamp']
-                    }
-                    
-                    # Add output voltages and standard deviations for each input combination
-                    for label in INPUT_LABELS:
-                        if label in result['measurements']:
-                            meas = result['measurements'][label]
-                            row[f'Input_{label}_Output_V'] = meas['output_voltage_avg']
-                            row[f'Input_{label}_StdDev_V'] = meas['output_voltage_std']
-                            row[f'Input_{label}_InputA_V'] = meas['input_voltages'][0]
-                            row[f'Input_{label}_InputB_V'] = meas['input_voltages'][1]
-                        else:
-                            row[f'Input_{label}_Output_V'] = None
-                            row[f'Input_{label}_StdDev_V'] = None
-                            row[f'Input_{label}_InputA_V'] = None
-                            row[f'Input_{label}_InputB_V'] = None
-                    
-                    main_data.append(row)
-                
-                main_df = pd.DataFrame(main_data)
-                main_df.to_excel(writer, sheet_name='Detailed_Results', index=False)
-            
-            print(f"Detailed Excel backup saved to: {excel_filename}")
-            
-        except Exception as e:
-            print(f"Error saving detailed Excel file: {e}")
+            print(f"Error saving clean format results: {e}")
     
     def print_summary(self):
         """Print a summary of the measurement results"""
@@ -511,8 +421,8 @@ class WavelengthSweepMeasurement:
             
             for label in INPUT_LABELS:
                 if (label in result['measurements'] and 
-                    result['measurements'][label]['output_voltage_avg'] is not None):
-                    voltage = result['measurements'][label]['output_voltage_avg']
+                    result['measurements'][label]['output_voltage'] is not None):
+                    voltage = result['measurements'][label]['output_voltage']
                     row += f" {voltage:<7.3f}"
                 else:
                     row += f" {'FAIL':<7}"
@@ -527,8 +437,8 @@ class WavelengthSweepMeasurement:
             outputs = []
             for label in INPUT_LABELS:
                 if (label in result['measurements'] and 
-                    result['measurements'][label]['output_voltage_avg'] is not None):
-                    outputs.append(result['measurements'][label]['output_voltage_avg'])
+                    result['measurements'][label]['output_voltage'] is not None):
+                    outputs.append(result['measurements'][label]['output_voltage'])
             
             if len(outputs) >= 2:
                 output_range = max(outputs) - min(outputs)
@@ -569,7 +479,7 @@ def main():
     
     # You can specify a custom base configuration here
     # Example with some heaters set to specific values:
-    custom_base_config = {0: 4.9, 1: 1.273, 2: 0.1, 3: 1.742, 4: 0.1, 5: 3.244, 6: 4.9, 7: 3.946, 8: 0.902, 9: 3.166, 10: 4.634, 11: 4.9, 12: 1.76, 13: 1.419, 14: 0.1, 15: 1.569, 16: 1.59, 17: 0.103, 18: 3.44, 19: 0.1, 20: 4.9, 21: 2.076, 22: 2.404, 23: 4.9, 24: 0.229, 25: 2.302, 26: 1.816, 27: 0.797, 28: 0.1, 29: 3.828, 30: 0.932, 31: 1.728, 32: 4.514, 33: 0.01, 34: 0.01, 35: 0.01, 36: 0.0, 37: 0.0, 38: 0.01, 39: 0.01}
+    custom_base_config = {0: 4.553, 1: 0.742, 2: 1.849, 3: 1.538, 4: 0.496, 5: 3.839, 6: 3.627, 7: 3.612, 8: 1.131, 9: 1.774, 10: 3.813, 11: 4.141, 12: 2.371, 13: 1.352, 14: 0.144, 15: 0.492, 16: 2.914, 17: 0.474, 18: 3.143, 19: 0.424, 20: 4.9, 21: 2.685, 22: 3.515, 23: 3.627, 24: 0.74, 25: 3.327, 26: 1.945, 27: 0.256, 28: 0.1, 29: 3.449, 30: 0.306, 31: 2.813, 32: 4.731, 33: 0.01, 34: 0.01, 35: 0.01, 36: 0.0, 37: 0.0, 38: 0.01, 39: 0.01}
     # Initialize measurement system
     # Use custom_base_config or None for minimal configuration
     measurement = WavelengthSweepMeasurement(base_config=custom_base_config)
