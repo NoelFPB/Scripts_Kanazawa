@@ -12,7 +12,7 @@ SERIAL_PORT = 'COM4'
 BAUD_RATE = 115200
 
 # === GATE CONFIGURATION ===
-GATE_TYPE = "XOR"  # Logic gate type to optimize (AND, OR, NAND, NOR, XOR, XNOR)
+GATE_TYPE = "NAND"  # Logic gate type to optimize (AND, OR, NAND, NOR, XOR, XNOR)
 INPUT_HEATERS = [36, 37]  # Heaters for input A and B
 
 # Voltage definitions
@@ -210,9 +210,17 @@ class BayesianLogicGateOptimizer:
         avg_std = (high_std + low_std) / 2
         consistency_score = 10 * np.exp(-avg_std * 5)  # Full points for <0.2V std dev
         
-        # === COMBINE SCORES ===
         total_score = er_score + strength_score + consistency_score
         
+        # Add this after calculating consistency_score:
+        # Extra penalty for HIGH output variation
+        if len(high_outputs) > 1:
+            high_range = max(high_outputs) - min(high_outputs)
+            high_consistency_penalty = -20 * min(1.0, high_range / 2.0)  # -20 points for 2V+ variation
+            total_score += high_consistency_penalty
+        # === COMBINE SCORES ===
+        
+
         # Cap at 100 points
         final_score = min(100, max(-50, total_score))
         
@@ -632,10 +640,10 @@ class BayesianLogicGateOptimizer:
             self.bayesian_optimize(n_iterations=10)
             
             # # Phase 3: Local exploration around best
-            # self.explore_around_best(n_samples=8)
+            self.explore_around_best(n_samples=8)
             
             # # Phase 4: Final Bayesian refinement
-            # self.bayesian_optimize(n_iterations=10)
+            self.bayesian_optimize(n_iterations=10)
             
             # Test final configuration
             self.test_final_configuration()
