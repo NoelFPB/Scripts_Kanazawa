@@ -12,7 +12,7 @@ SERIAL_PORT = 'COM4'
 BAUD_RATE = 115200
 
 # === GATE CONFIGURATION ===
-GATE_TYPE = "AND"  # Logic gate type to optimize (AND, OR, NAND, NOR, XOR, XNOR)
+GATE_TYPE = "OR"  # Logic gate type to optimize (AND, OR, NAND, NOR, XOR, XNOR)
 INPUT_HEATERS = [36, 37]  # Heaters for input A and B
 
 # Voltage definitions
@@ -216,9 +216,13 @@ class BayesianLogicGateOptimizer:
         # Extra penalty for HIGH output variation
         if len(high_outputs) > 1:
             high_range = max(high_outputs) - min(high_outputs)
-            high_consistency_penalty = -20 * min(1.0, high_range / 1.0)  # -20 points for 2V+ variation
+            high_consistency_penalty = -20 * min(1.0, high_range / 1.0)  # -20 points for 1V+ variation
             total_score += high_consistency_penalty
-        # === COMBINE SCORES ===
+
+        if len(low_outputs) > 1:
+            low_range = max(low_outputs) - min(low_outputs)
+            low_consistency_penalty = -20 * min(1.0, low_range / 1.0)  # -20 points for 1V+ variation
+            total_score += low_consistency_penalty
         
 
         # Cap at 100 points
@@ -281,58 +285,7 @@ class BayesianLogicGateOptimizer:
             print(f"    GP fitting failed: {e}")
             self.gp = None
             return False
-
-    def acquisition_function(self, x):
-        """Upper Confidence Bound acquisition function"""
-        if self.gp is None:
-            return random.random()
         
-        x = x.reshape(1, -1)
-        mu, sigma = self.gp.predict(x, return_std=True)
-        mu, sigma = mu[0], sigma[0]
-        
-        # UCB with exploration parameter
-        beta = 3.0  # Exploration vs exploitation balance
-        ucb = mu + beta * sigma
-        
-        return ucb
-
-    def suggest_next_config(self):
-        """Suggest next configuration using Bayesian optimization"""
-        if self.gp is None or len(self.X_evaluated) < 5:
-            # Random exploration for initial points
-            x = np.random.uniform(V_MIN, V_MAX, len(MODIFIABLE_HEATERS))
-            return self.array_to_config(x)
-        
-        # Generate candidate configurations
-        n_candidates = 3000
-        
-        # Mix of random and local search candidates
-        candidates = []
-        
-        # 70% random exploration
-        n_random = int(0.7 * n_candidates)
-        random_candidates = np.random.uniform(V_MIN, V_MAX, size=(n_random, len(MODIFIABLE_HEATERS)))
-        candidates.extend(random_candidates)
-        
-        # 30% local search around best configurations
-        n_local = n_candidates - n_random
-        if self.best_config:
-            for _ in range(n_local):
-                base_x = self.config_to_array(self.best_config)
-                noise = np.random.normal(0, 0.5, len(MODIFIABLE_HEATERS))
-                candidate = np.clip(base_x + noise, V_MIN, V_MAX)
-                candidates.append(candidate)
-        
-        candidates = np.array(candidates)
-        
-        # Evaluate acquisition function
-        acquisition_values = [self.acquisition_function(c) for c in candidates]
-        
-        # Select best candidate
-        best_idx = np.argmax(acquisition_values)
-        return self.array_to_config(candidates[best_idx])
-
     def initial_sampling(self, n_samples=20):
         """Initial sampling focused on finding real working logic gates"""
         print(f"Initial sampling with {n_samples} configurations...")
@@ -435,8 +388,14 @@ class BayesianLogicGateOptimizer:
                 # Predict scores for ALL candidates (this is fast!)
                 mu, sigma = self.gp.predict(candidates, return_std=True)
                 
-                # UCB acquisition function
-                beta = 3.0
+                if self.best_score < 50:
+                    beta = 3.0
+                elif self.best_score < 60:
+                    beta = 2.0
+                else:
+                    beta = 1.0
+
+                print("Beta ", beta)
                 ucb_scores = mu + beta * sigma
                 
                 # Select the top candidates to actually test
@@ -619,13 +578,16 @@ class BayesianLogicGateOptimizer:
             self.initial_sampling(n_samples=30)
             
             # Phase 2: Bayesian optimization
-            self.bayesian_optimize(n_iterations=10)
+            self.bayesian_optimize(n_iterations=15)
             
             # # Phase 3: Local exploration around best
             self.explore_around_best(n_samples=8)
             
             # # Phase 4: Final Bayesian refinement
-            self.bayesian_optimize(n_iterations=10)
+            self.bayesian_optimize(n_iterations=20)
+            
+            self.explore_around_best(n_samples=8)
+            
             
             # Test final configuration
             self.test_final_configuration()
