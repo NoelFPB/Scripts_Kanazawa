@@ -33,6 +33,14 @@ INPUT_COMBINATIONS = [
 
 INPUT_LABELS = ["00", "01", "10", "11"]
 
+# Gate type mapping for clean output
+GATE_TYPE_MAPPING = {
+    "00": "Gate_00",  # You can customize these labels
+    "01": "Gate_01",
+    "10": "Gate_10", 
+    "11": "Gate_11"
+}
+
 # Measurement parameters
 NUM_MEASUREMENTS_PER_POINT = 3  # Average multiple measurements for accuracy
 LASER_SETTLING_TIME = 1       # Time to wait after wavelength change (seconds)
@@ -306,13 +314,99 @@ class WavelengthSweepMeasurement:
             print(f"Wavelengths measured: {len(self.results)}/{len(wavelengths)}")
             
             if self.results:
-                self.save_results()
+                self.save_results_clean_format()
+                self.save_results_detailed()  # Keep detailed results as backup
                 self.print_summary()
     
-    def save_results(self):
-        """Save results to Excel file with multiple sheets"""
+    def save_results_clean_format(self):
+        """Save results in clean format matching the target Excel style"""
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        excel_filename = f"wavelength_sweep_{timestamp}.xlsx"
+        excel_filename = f"wavelength_sweep_clean_{timestamp}.xlsx"
+        
+        try:
+            # Get wavelength list for column headers
+            wavelengths = self.get_wavelength_list()
+            
+            # Create clean data structure
+            clean_data = []
+            
+            # Create one row for each input combination
+            for input_label in INPUT_LABELS:
+                input_combo = INPUT_COMBINATIONS[INPUT_LABELS.index(input_label)]
+                
+                # Create row data
+                row_data = {
+                    'Gate': GATE_TYPE_MAPPING.get(input_label, f"Gate_{input_label}"),
+                    'A': input_combo[0],
+                    'B': input_combo[1]
+                }
+                
+                # Add wavelength measurements as columns
+                for wavelength in wavelengths:
+                    # Find measurement for this wavelength and input combination
+                    measurement_value = None
+                    for result in self.results:
+                        if result['wavelength'] == wavelength:
+                            if (input_label in result['measurements'] and 
+                                result['measurements'][input_label]['output_voltage_avg'] is not None):
+                                measurement_value = round(result['measurements'][input_label]['output_voltage_avg'], 3)
+                            break
+                    
+                    # Use wavelength as column name
+                    row_data[str(wavelength)] = measurement_value
+                
+                clean_data.append(row_data)
+            
+            # Create DataFrame
+            clean_df = pd.DataFrame(clean_data)
+            
+            # Save to Excel with clean formatting
+            with pd.ExcelWriter(excel_filename, engine='openpyxl') as writer:
+                clean_df.to_excel(writer, sheet_name='Clean_Results', index=False)
+                
+                # Get the workbook and worksheet for formatting
+                workbook = writer.book
+                worksheet = writer.sheets['Clean_Results']
+                
+                # Format headers
+                for col_num, column_title in enumerate(clean_df.columns, 1):
+                    cell = worksheet.cell(row=1, column=col_num)
+                    cell.font = workbook.create_font(bold=True)
+                
+                # Auto-adjust column widths
+                for column in worksheet.columns:
+                    max_length = 0
+                    column_letter = column[0].column_letter
+                    for cell in column:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    adjusted_width = min(max_length + 2, 15)
+                    worksheet.column_dimensions[column_letter].width = adjusted_width
+            
+            print(f"Clean Excel results saved to: {excel_filename}")
+            
+            # Also save as CSV for easy copying
+            csv_filename = f"wavelength_sweep_clean_{timestamp}.csv"
+            clean_df.to_csv(csv_filename, index=False)
+            print(f"Clean CSV results saved to: {csv_filename}")
+            
+            # Print preview of clean data
+            print(f"\nClean data preview:")
+            print(f"{'='*80}")
+            print(clean_df.to_string(index=False, max_cols=8))
+            if len(clean_df.columns) > 8:
+                print(f"... (showing first 8 columns, total: {len(clean_df.columns)} columns)")
+            
+        except Exception as e:
+            print(f"Error saving clean format Excel file: {e}")
+    
+    def save_results_detailed(self):
+        """Save detailed results (original format) as backup"""
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        excel_filename = f"wavelength_sweep_detailed_{timestamp}.xlsx"
         
         try:
             # Create Excel writer object
@@ -391,91 +485,12 @@ class WavelengthSweepMeasurement:
                     main_data.append(row)
                 
                 main_df = pd.DataFrame(main_data)
-                main_df.to_excel(writer, sheet_name='Results', index=False)
-                
-                # Sheet 4: Summary Statistics
-                if main_data:
-                    summary_data = {
-                        'Input_Combination': INPUT_LABELS,
-                        'Min_Output_V': [],
-                        'Max_Output_V': [],
-                        'Mean_Output_V': [],
-                        'Std_Output_V': [],
-                        'Output_Range_V': []
-                    }
-                    
-                    for label in INPUT_LABELS:
-                        output_col = f'Input_{label}_Output_V'
-                        if output_col in main_df.columns:
-                            outputs = main_df[output_col].dropna()
-                            if len(outputs) > 0:
-                                summary_data['Min_Output_V'].append(outputs.min())
-                                summary_data['Max_Output_V'].append(outputs.max())
-                                summary_data['Mean_Output_V'].append(outputs.mean())
-                                summary_data['Std_Output_V'].append(outputs.std())
-                                summary_data['Output_Range_V'].append(outputs.max() - outputs.min())
-                            else:
-                                summary_data['Min_Output_V'].append(None)
-                                summary_data['Max_Output_V'].append(None)
-                                summary_data['Mean_Output_V'].append(None)
-                                summary_data['Std_Output_V'].append(None)
-                                summary_data['Output_Range_V'].append(None)
-                        else:
-                            summary_data['Min_Output_V'].append(None)
-                            summary_data['Max_Output_V'].append(None)
-                            summary_data['Mean_Output_V'].append(None)
-                            summary_data['Std_Output_V'].append(None)
-                            summary_data['Output_Range_V'].append(None)
-                    
-                    summary_df = pd.DataFrame(summary_data)
-                    summary_df.to_excel(writer, sheet_name='Summary_Statistics', index=False)
+                main_df.to_excel(writer, sheet_name='Detailed_Results', index=False)
             
-            print(f"Excel results saved to: {excel_filename}")
-            
-            # Also save CSV for backwards compatibility
-            csv_filename = f"wavelength_sweep_{timestamp}.csv"
-            main_df.to_csv(csv_filename, index=False)
-            print(f"CSV backup saved to: {csv_filename}")
+            print(f"Detailed Excel backup saved to: {excel_filename}")
             
         except Exception as e:
-            print(f"Error saving Excel file: {e}")
-            print("Attempting to save CSV file as backup...")
-            
-            # Fallback to CSV if Excel fails
-            try:
-                csv_filename = f"wavelength_sweep_{timestamp}_backup.csv"
-                main_data = []
-                for result in self.results:
-                    row = [result['wavelength'], result['timestamp']]
-                    
-                    for label in INPUT_LABELS:
-                        if label in result['measurements']:
-                            meas = result['measurements'][label]
-                            row.extend([
-                                meas['output_voltage_avg'], 
-                                meas['output_voltage_std']
-                            ])
-                        else:
-                            row.extend([None, None])
-                    
-                    main_data.append(row)
-                
-                with open(csv_filename, 'w', newline='') as f:
-                    writer = csv.writer(f)
-                    
-                    # Header
-                    header = ['Wavelength_nm', 'Timestamp']
-                    for label in INPUT_LABELS:
-                        header.extend([f'{label}_Output_V', f'{label}_Std_V'])
-                    writer.writerow(header)
-                    
-                    # Data
-                    writer.writerows(main_data)
-                
-                print(f"CSV backup saved to: {csv_filename}")
-                
-            except Exception as csv_error:
-                print(f"Error saving CSV backup: {csv_error}")
+            print(f"Error saving detailed Excel file: {e}")
     
     def print_summary(self):
         """Print a summary of the measurement results"""

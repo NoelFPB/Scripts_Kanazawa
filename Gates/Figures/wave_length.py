@@ -2,6 +2,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 
+# Generates the image of the extinction ratio by wavelength
+
+
 def get_expected_states(gate_name):
     """
     Define expected HIGH and LOW states for each gate based on truth tables
