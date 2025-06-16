@@ -59,7 +59,7 @@ def run_laser_sequence():
         print("--- Step 2: 1552nm sequence ---")
         
         print("Setting wavelength to 1552nm...")
-        laser.write('LW1552nm')
+        laser.write('LW1550nm')
         time.sleep(2)
         
         # Verify wavelength
@@ -196,7 +196,7 @@ def interactive_laser_control():
     
     finally:
         try:
-            laser.write('LE0')  # Safety: turn off laser
+            #laser.write('LE0')  # Safety: turn off laser
             print("🛡️ Laser turned OFF for safety")
         except:
             pass

@@ -3,6 +3,10 @@ import time
 import pyvisa
 import numpy as np
 import random
+import pickle
+import json
+import os
+from datetime import datetime
 from scipy.stats import qmc
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, WhiteKernel, ConstantKernel
@@ -32,13 +36,18 @@ TEST_CONFIGURATIONS = [
 
 class BayesianDecoderOptimizer:
 
-    def __init__(self):
+    def __init__(self, save_dir="bayesian_models"):
         print("Initializing improved Bayesian decoder optimization...")
+        
+        # Create save directory
+        self.save_dir = save_dir
+        os.makedirs(save_dir, exist_ok=True)
         
         # Bayesian optimization storage
         self.X_evaluated = []  # Configuration vectors
         self.y_evaluated = []  # Scores
         self.gp = None        # Gaussian Process model
+        self.optimization_history = []  # Track optimization progress
         
         # Initialize hardware connections
         self.scope = self._init_scope()
@@ -48,6 +57,10 @@ class BayesianDecoderOptimizer:
         # Best configuration found
         self.best_config = None
         self.best_score = float('-inf')
+        
+        # Session tracking
+        self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.total_evaluations = 0
 
         self.base_config = {}
         
@@ -55,6 +68,226 @@ class BayesianDecoderOptimizer:
         for h in FIXED_FIRST_LAYER:
             if h not in INPUT_PINS:
                 self.base_config[h] = 0.01
+
+    def save_state(self, filename=None):
+        """Save the complete optimization state"""
+        if filename is None:
+            filename = f"bayesian_state_{self.session_id}.pkl"
+        
+        filepath = os.path.join(self.save_dir, filename)
+        
+        # Prepare state dictionary
+        state = {
+            'X_evaluated': self.X_evaluated,
+            'y_evaluated': self.y_evaluated,
+            'best_config': self.best_config,
+            'best_score': self.best_score,
+            'optimization_history': self.optimization_history,
+            'total_evaluations': self.total_evaluations,
+            'session_id': self.session_id,
+            'timestamp': datetime.now().isoformat(),
+            'modifiable_heaters': MODIFIABLE_HEATERS,
+            'v_min': V_MIN,
+            'v_max': V_MAX
+        }
+        
+        # Save the Gaussian Process model separately (if it exists)
+        if self.gp is not None:
+            gp_filepath = os.path.join(self.save_dir, f"gp_model_{self.session_id}.pkl")
+            with open(gp_filepath, 'wb') as f:
+                pickle.dump(self.gp, f)
+            state['gp_model_file'] = f"gp_model_{self.session_id}.pkl"
+        
+        # Save main state
+        with open(filepath, 'wb') as f:
+            pickle.dump(state, f)
+        
+        # Also save a human-readable summary
+        summary_filepath = os.path.join(self.save_dir, f"summary_{self.session_id}.json")
+        summary = {
+            'session_id': self.session_id,
+            'total_evaluations': self.total_evaluations,
+            'best_score': float(self.best_score) if self.best_score != float('-inf') else None,
+            'best_config': self.best_config,
+            'data_points': len(self.X_evaluated),
+            'timestamp': datetime.now().isoformat(),
+            'score_history': [float(score) for score in self.y_evaluated[-20:]]  # Last 20 scores
+        }
+        
+        with open(summary_filepath, 'w') as f:
+            json.dump(summary, f, indent=2)
+        
+        print(f"State saved to: {filepath}")
+        print(f"Summary saved to: {summary_filepath}")
+        if self.gp is not None:
+            print(f"GP model saved separately")
+        
+        return filepath
+
+    def load_state(self, filepath=None, session_id=None):
+        """Load a previous optimization state"""
+        if filepath is None:
+            if session_id is None:
+                # Find the most recent state file
+                state_files = [f for f in os.listdir(self.save_dir) if f.startswith('bayesian_state_') and f.endswith('.pkl')]
+                if not state_files:
+                    print("No saved states found.")
+                    return False
+                filepath = os.path.join(self.save_dir, max(state_files))
+            else:
+                filepath = os.path.join(self.save_dir, f"bayesian_state_{session_id}.pkl")
+        
+        if not os.path.exists(filepath):
+            print(f"State file not found: {filepath}")
+            return False
+        
+        try:
+            with open(filepath, 'rb') as f:
+                state = pickle.load(f)
+            
+            # Restore state
+            self.X_evaluated = state['X_evaluated']
+            self.y_evaluated = state['y_evaluated']
+            self.best_config = state['best_config']
+            self.best_score = state['best_score']
+            self.optimization_history = state.get('optimization_history', [])
+            self.total_evaluations = state.get('total_evaluations', len(self.y_evaluated))
+            
+            # Load GP model if available
+            if 'gp_model_file' in state:
+                gp_filepath = os.path.join(self.save_dir, state['gp_model_file'])
+                if os.path.exists(gp_filepath):
+                    with open(gp_filepath, 'rb') as f:
+                        self.gp = pickle.load(f)
+                    print("Gaussian Process model loaded successfully!")
+                else:
+                    print("GP model file not found, will retrain from data")
+                    self.fit_gaussian_process()
+            else:
+                print("No GP model in saved state, will retrain from data")
+                if len(self.X_evaluated) >= 3:
+                    self.fit_gaussian_process()
+            
+            print(f"State loaded successfully from: {filepath}")
+            print(f"Loaded {len(self.X_evaluated)} data points")
+            print(f"Best score so far: {self.best_score:.2f}")
+            print(f"Total evaluations: {self.total_evaluations}")
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error loading state: {e}")
+            return False
+
+    def list_saved_states(self):
+        """List all available saved states"""
+        state_files = [f for f in os.listdir(self.save_dir) if f.startswith('bayesian_state_') and f.endswith('.pkl')]
+        summary_files = [f for f in os.listdir(self.save_dir) if f.startswith('summary_') and f.endswith('.json')]
+        
+        print(f"\nAvailable saved states in {self.save_dir}:")
+        print("-" * 80)
+        
+        for summary_file in sorted(summary_files):
+            summary_path = os.path.join(self.save_dir, summary_file)
+            try:
+                with open(summary_path, 'r') as f:
+                    summary = json.load(f)
+                
+                session_id = summary['session_id']
+                best_score = summary.get('best_score', 'N/A')
+                data_points = summary.get('data_points', 0)
+                timestamp = summary.get('timestamp', 'Unknown')
+                
+                print(f"Session ID: {session_id}")
+                print(f"  Best Score: {best_score}")
+                print(f"  Data Points: {data_points}")
+                print(f"  Timestamp: {timestamp}")
+                print()
+                
+            except Exception as e:
+                print(f"Error reading {summary_file}: {e}")
+
+    def merge_states(self, filepaths):
+        """Merge multiple saved states into the current one"""
+        print(f"Merging {len(filepaths)} saved states...")
+        
+        all_X = []
+        all_y = []
+        best_overall_score = self.best_score
+        best_overall_config = self.best_config
+        
+        for filepath in filepaths:
+            try:
+                with open(filepath, 'rb') as f:
+                    state = pickle.load(f)
+                
+                # Add data points
+                all_X.extend(state['X_evaluated'])
+                all_y.extend(state['y_evaluated'])
+                
+                # Update best if better
+                if state['best_score'] > best_overall_score:
+                    best_overall_score = state['best_score']
+                    best_overall_config = state['best_config']
+                
+                print(f"  Loaded {len(state['X_evaluated'])} points from {os.path.basename(filepath)}")
+                
+            except Exception as e:
+                print(f"  Error loading {filepath}: {e}")
+        
+        # Update current state
+        self.X_evaluated.extend(all_X)
+        self.y_evaluated.extend(all_y)
+        self.best_score = best_overall_score
+        self.best_config = best_overall_config
+        self.total_evaluations = len(self.y_evaluated)
+        
+        # Remove duplicates (configurations that are very similar)
+        self._remove_duplicates()
+        
+        # Retrain GP with merged data
+        if len(self.X_evaluated) >= 3:
+            self.fit_gaussian_process()
+        
+        print(f"Merge complete! Total data points: {len(self.X_evaluated)}")
+        print(f"Best score: {self.best_score:.2f}")
+
+    def _remove_duplicates(self, tolerance=1e-3):
+        """Remove duplicate or very similar configurations"""
+        if len(self.X_evaluated) <= 1:
+            return
+        
+        X = np.array(self.X_evaluated)
+        y = np.array(self.y_evaluated)
+        
+        # Find unique configurations
+        unique_mask = np.ones(len(X), dtype=bool)
+        
+        for i in range(len(X)):
+            if not unique_mask[i]:
+                continue
+            for j in range(i + 1, len(X)):
+                if unique_mask[j] and np.allclose(X[i], X[j], atol=tolerance):
+                    # Keep the one with better score
+                    if y[j] > y[i]:
+                        unique_mask[i] = False
+                        break
+                    else:
+                        unique_mask[j] = False
+        
+        # Update data
+        original_count = len(self.X_evaluated)
+        self.X_evaluated = [self.X_evaluated[i] for i in range(len(self.X_evaluated)) if unique_mask[i]]
+        self.y_evaluated = [self.y_evaluated[i] for i in range(len(self.y_evaluated)) if unique_mask[i]]
+        
+        removed_count = original_count - len(self.X_evaluated)
+        if removed_count > 0:
+            print(f"Removed {removed_count} duplicate configurations")
+
+    def auto_save_callback(self):
+        """Automatically save state periodically"""
+        if len(self.y_evaluated) % 10 == 0:  # Save every 10 evaluations
+            self.save_state()
 
     def _init_scope(self):
         """Initialize oscilloscope for decoder output measurement"""
@@ -247,6 +480,22 @@ class BayesianDecoderOptimizer:
         # Apply gentle bounds (wider range for more exploration)
         final_score = min(100, max(-50, total_score))
         
+        # Update total evaluations counter
+        self.total_evaluations += 1
+        
+        # Track optimization history
+        self.optimization_history.append({
+            'evaluation': self.total_evaluations,
+            'score': final_score,
+            'separation': separation,
+            'active_mean': active_mean,
+            'inactive_mean': inactive_mean,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+        # Auto-save periodically
+        self.auto_save_callback()
+        
         # === DETAILED DEBUG OUTPUT FOR IMPROVEMENTS ===
         if final_score > self.best_score:
             print(f"  === NEW BEST CONFIGURATION ===")
@@ -327,7 +576,6 @@ class BayesianDecoderOptimizer:
             print(f"    GP fitting failed: {e}")
             self.gp = None
             return False
-
 
     def acquisition_function(self, x, beta):  # Pass beta as parameter
         if self.gp is None:
@@ -437,7 +685,7 @@ class BayesianDecoderOptimizer:
                     beta = 6.0    # High exploration when stuck in bad region
                 elif self.best_score < 25:
                     beta = 5.0    # Moderate exploration for early progress  
-                elif self.best_score < 50:
+                elif self.best_score < 45:
                     beta = 4.0    # Balanced exploration/exploitation
                 elif self.best_score < 70:
                     beta = 3    # More exploitation as you find good solutions
@@ -624,17 +872,34 @@ class BayesianDecoderOptimizer:
         self.serial.close()
         self.scope.close()
         print("Connections closed.")
- 
 
-    def optimize(self):
-        self.initial_sampling(n_samples=30)
+    def optimize(self, resume_from_session=None):
+        """Main optimization function with optional resume capability"""
         
-        self.bayesian_optimize(n_iterations=25)  # Reduced iterations
+        # Try to load previous state if requested
+        if resume_from_session:
+            if self.load_state(session_id=resume_from_session):
+                print(f"Resumed from session {resume_from_session}")
+                print(f"Starting from {len(self.X_evaluated)} data points, best score: {self.best_score:.2f}")
+            else:
+                print(f"Could not load session {resume_from_session}, starting fresh")
+        
+        # Only do initial sampling if we don't have enough data
+        if len(self.X_evaluated) < 30:
+            needed_samples = 30 - len(self.X_evaluated)
+            print(f"Need {needed_samples} more initial samples...")
+            self.initial_sampling(n_samples=needed_samples)
+        
+        self.bayesian_optimize(n_iterations=10)  # Reduced iterations
     
         self.explore_around_best()  # More local exploration
     
         self.bayesian_optimize(n_iterations=15)  # Reduced iterations
-        
+    
+        self.explore_around_best()  # More local exploration
+
+        self.bayesian_optimize(n_iterations=20)  # Reduced iterations
+    
         self.explore_around_best()  # More local exploration
 
         if self.best_score > 60:
@@ -644,13 +909,16 @@ class BayesianDecoderOptimizer:
         if self.best_score > 80:
             self.bayesian_optimize(n_iterations=20)  # Reduced iterations        
             self.explore_around_best()  # More local exploration
-    
 
         self.test_final_configuration()
+        
+        # Final save
+        final_save_path = self.save_state()
         
         print(f"\nOptimization complete!")
         print(f"Best score: {self.best_score:.2f}")
         print(f"Total evaluations: {len(self.y_evaluated)}")
+        print(f"Final state saved to: {final_save_path}")
         print("\nFinal heater configuration:")
         print(self.format_config())
         
@@ -659,14 +927,39 @@ class BayesianDecoderOptimizer:
 
 def main():
     start_time = time.time()
+    
+    # Parse command line arguments for resume functionality
+    import sys
+    
+    resume_session = None
+    if len(sys.argv) > 1:
+        if sys.argv[1] == '--list':
+            optimizer = BayesianDecoderOptimizer()
+            optimizer.list_saved_states()
+            return
+        elif sys.argv[1] == '--resume' and len(sys.argv) > 2:
+            resume_session = sys.argv[2]
+        elif sys.argv[1] == '--merge' and len(sys.argv) > 2:
+            optimizer = BayesianDecoderOptimizer()
+            # Load multiple state files and merge them
+            state_files = sys.argv[2:]
+            state_paths = [os.path.join(optimizer.save_dir, f) for f in state_files]
+            optimizer.merge_states(state_paths)
+            optimizer.save_state(f"merged_{optimizer.session_id}.pkl")
+            return
+    
     optimizer = BayesianDecoderOptimizer()
     
     try:
-        optimizer.optimize()
+        optimizer.optimize(resume_from_session=resume_session)
     except KeyboardInterrupt:
         print("\nOptimization interrupted by user")
+        print("Saving current state...")
+        optimizer.save_state(f"interrupted_{optimizer.session_id}.pkl")
     except Exception as e:
         print(f"Error: {e}")
+        print("Saving current state...")
+        optimizer.save_state(f"error_{optimizer.session_id}.pkl")
     finally:
         try:
             optimizer.cleanup()

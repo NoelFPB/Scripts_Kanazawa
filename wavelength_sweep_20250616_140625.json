@@ -1,0 +1,534 @@
+{
+  "measurement_info": {
+    "timestamp": "2025-06-16T14:06:25.061190",
+    "wavelength_range": "1548.0-1552.0nm",
+    "wavelength_step": 0.4,
+    "input_combinations": [
+      [
+        0.1,
+        0.1
+      ],
+      [
+        0.1,
+        4.9
+      ],
+      [
+        4.9,
+        0.1
+      ],
+      [
+        4.9,
+        4.9
+      ]
+    ],
+    "base_config": {
+      "0": 0.886,
+      "1": 4.2,
+      "2": 1.797,
+      "3": 0.387,
+      "4": 1.601,
+      "5": 2.792,
+      "6": 0.469,
+      "7": 4.9,
+      "8": 1.334,
+      "9": 0.1,
+      "10": 1.466,
+      "11": 0.1,
+      "12": 3.39,
+      "13": 3.025,
+      "14": 3.149,
+      "15": 4.693,
+      "16": 0.1,
+      "17": 4.39,
+      "18": 4.9,
+      "19": 3.353,
+      "20": 0.993,
+      "21": 1.681,
+      "22": 3.301,
+      "23": 0.1,
+      "24": 2.528,
+      "25": 4.662,
+      "26": 0.643,
+      "27": 4.9,
+      "28": 1.923,
+      "29": 2.676,
+      "30": 3.539,
+      "31": 4.9,
+      "32": 2.566,
+      "33": 0.01,
+      "34": 0.01,
+      "35": 0.01,
+      "36": 0.0,
+      "37": 0.0,
+      "38": 0.01,
+      "39": 0.01
+    },
+    "laser_settling_time": 1,
+    "heater_settling_time": 0.3,
+    "measurements_per_point": 3
+  },
+  "results": [
+    {
+      "wavelength": 1548.0,
+      "timestamp": "2025-06-16T14:02:28.108108",
+      "measurements": {
+        "00": {
+          "input_voltages": [
+            0.1,
+            0.1
+          ],
+          "output_voltage_avg": 2.332,
+          "output_voltage_std": 0.07193,
+          "num_measurements": 3
+        },
+        "01": {
+          "input_voltages": [
+            0.1,
+            4.9
+          ],
+          "output_voltage_avg": 1.49267,
+          "output_voltage_std": 0.03546,
+          "num_measurements": 3
+        },
+        "10": {
+          "input_voltages": [
+            4.9,
+            0.1
+          ],
+          "output_voltage_avg": 5.88467,
+          "output_voltage_std": 0.05468,
+          "num_measurements": 3
+        },
+        "11": {
+          "input_voltages": [
+            4.9,
+            4.9
+          ],
+          "output_voltage_avg": 2.70833,
+          "output_voltage_std": 0.03156,
+          "num_measurements": 3
+        }
+      }
+    },
+    {
+      "wavelength": 1548.4,
+      "timestamp": "2025-06-16T14:02:51.362307",
+      "measurements": {
+        "00": {
+          "input_voltages": [
+            0.1,
+            0.1
+          ],
+          "output_voltage_avg": 1.82167,
+          "output_voltage_std": 0.01037,
+          "num_measurements": 3
+        },
+        "01": {
+          "input_voltages": [
+            0.1,
+            4.9
+          ],
+          "output_voltage_avg": 2.17567,
+          "output_voltage_std": 0.02831,
+          "num_measurements": 3
+        },
+        "10": {
+          "input_voltages": [
+            4.9,
+            0.1
+          ],
+          "output_voltage_avg": 5.14067,
+          "output_voltage_std": 0.05498,
+          "num_measurements": 3
+        },
+        "11": {
+          "input_voltages": [
+            4.9,
+            4.9
+          ],
+          "output_voltage_avg": 2.857,
+          "output_voltage_std": 0.0178,
+          "num_measurements": 3
+        }
+      }
+    },
+    {
+      "wavelength": 1548.8,
+      "timestamp": "2025-06-16T14:03:14.622330",
+      "measurements": {
+        "00": {
+          "input_voltages": [
+            0.1,
+            0.1
+          ],
+          "output_voltage_avg": 1.566,
+          "output_voltage_std": 0.01273,
+          "num_measurements": 3
+        },
+        "01": {
+          "input_voltages": [
+            0.1,
+            4.9
+          ],
+          "output_voltage_avg": 3.12033,
+          "output_voltage_std": 0.01377,
+          "num_measurements": 3
+        },
+        "10": {
+          "input_voltages": [
+            4.9,
+            0.1
+          ],
+          "output_voltage_avg": 5.27133,
+          "output_voltage_std": 0.00759,
+          "num_measurements": 3
+        },
+        "11": {
+          "input_voltages": [
+            4.9,
+            4.9
+          ],
+          "output_voltage_avg": 3.73633,
+          "output_voltage_std": 0.02014,
+          "num_measurements": 3
+        }
+      }
+    },
+    {
+      "wavelength": 1549.2,
+      "timestamp": "2025-06-16T14:03:37.923589",
+      "measurements": {
+        "00": {
+          "input_voltages": [
+            0.1,
+            0.1
+          ],
+          "output_voltage_avg": 0.87727,
+          "output_voltage_std": 0.01042,
+          "num_measurements": 3
+        },
+        "01": {
+          "input_voltages": [
+            0.1,
+            4.9
+          ],
+          "output_voltage_avg": 3.226,
+          "output_voltage_std": 0.06649,
+          "num_measurements": 3
+        },
+        "10": {
+          "input_voltages": [
+            4.9,
+            0.1
+          ],
+          "output_voltage_avg": 4.17533,
+          "output_voltage_std": 0.0231,
+          "num_measurements": 3
+        },
+        "11": {
+          "input_voltages": [
+            4.9,
+            4.9
+          ],
+          "output_voltage_avg": 3.364,
+          "output_voltage_std": 0.03505,
+          "num_measurements": 3
+        }
+      }
+    },
+    {
+      "wavelength": 1549.6,
+      "timestamp": "2025-06-16T14:04:01.175154",
+      "measurements": {
+        "00": {
+          "input_voltages": [
+            0.1,
+            0.1
+          ],
+          "output_voltage_avg": 0.65557,
+          "output_voltage_std": 0.00727,
+          "num_measurements": 3
+        },
+        "01": {
+          "input_voltages": [
+            0.1,
+            4.9
+          ],
+          "output_voltage_avg": 3.44,
+          "output_voltage_std": 0.01273,
+          "num_measurements": 3
+        },
+        "10": {
+          "input_voltages": [
+            4.9,
+            0.1
+          ],
+          "output_voltage_avg": 3.93133,
+          "output_voltage_std": 0.01302,
+          "num_measurements": 3
+        },
+        "11": {
+          "input_voltages": [
+            4.9,
+            4.9
+          ],
+          "output_voltage_avg": 3.79267,
+          "output_voltage_std": 0.01103,
+          "num_measurements": 3
+        }
+      }
+    },
+    {
+      "wavelength": 1550.0,
+      "timestamp": "2025-06-16T14:04:24.456234",
+      "measurements": {
+        "00": {
+          "input_voltages": [
+            0.1,
+            0.1
+          ],
+          "output_voltage_avg": 0.42953,
+          "output_voltage_std": 0.01171,
+          "num_measurements": 3
+        },
+        "01": {
+          "input_voltages": [
+            0.1,
+            4.9
+          ],
+          "output_voltage_avg": 3.24833,
+          "output_voltage_std": 0.07731,
+          "num_measurements": 3
+        },
+        "10": {
+          "input_voltages": [
+            4.9,
+            0.1
+          ],
+          "output_voltage_avg": 3.57533,
+          "output_voltage_std": 0.01078,
+          "num_measurements": 3
+        },
+        "11": {
+          "input_voltages": [
+            4.9,
+            4.9
+          ],
+          "output_voltage_avg": 3.409,
+          "output_voltage_std": 0.05034,
+          "num_measurements": 3
+        }
+      }
+    },
+    {
+      "wavelength": 1550.4,
+      "timestamp": "2025-06-16T14:04:47.771006",
+      "measurements": {
+        "00": {
+          "input_voltages": [
+            0.1,
+            0.1
+          ],
+          "output_voltage_avg": 0.3239,
+          "output_voltage_std": 0.00763,
+          "num_measurements": 3
+        },
+        "01": {
+          "input_voltages": [
+            0.1,
+            4.9
+          ],
+          "output_voltage_avg": 3.42367,
+          "output_voltage_std": 0.00544,
+          "num_measurements": 3
+        },
+        "10": {
+          "input_voltages": [
+            4.9,
+            0.1
+          ],
+          "output_voltage_avg": 2.35567,
+          "output_voltage_std": 0.0252,
+          "num_measurements": 3
+        },
+        "11": {
+          "input_voltages": [
+            4.9,
+            4.9
+          ],
+          "output_voltage_avg": 3.71967,
+          "output_voltage_std": 0.06837,
+          "num_measurements": 3
+        }
+      }
+    },
+    {
+      "wavelength": 1550.8,
+      "timestamp": "2025-06-16T14:05:11.078055",
+      "measurements": {
+        "00": {
+          "input_voltages": [
+            0.1,
+            0.1
+          ],
+          "output_voltage_avg": 0.3521,
+          "output_voltage_std": 0.01259,
+          "num_measurements": 3
+        },
+        "01": {
+          "input_voltages": [
+            0.1,
+            4.9
+          ],
+          "output_voltage_avg": 4.21967,
+          "output_voltage_std": 0.01891,
+          "num_measurements": 3
+        },
+        "10": {
+          "input_voltages": [
+            4.9,
+            0.1
+          ],
+          "output_voltage_avg": 1.826,
+          "output_voltage_std": 0.01122,
+          "num_measurements": 3
+        },
+        "11": {
+          "input_voltages": [
+            4.9,
+            4.9
+          ],
+          "output_voltage_avg": 4.294,
+          "output_voltage_std": 0.03293,
+          "num_measurements": 3
+        }
+      }
+    },
+    {
+      "wavelength": 1551.2,
+      "timestamp": "2025-06-16T14:05:34.379690",
+      "measurements": {
+        "00": {
+          "input_voltages": [
+            0.1,
+            0.1
+          ],
+          "output_voltage_avg": 0.5872,
+          "output_voltage_std": 0.00759,
+          "num_measurements": 3
+        },
+        "01": {
+          "input_voltages": [
+            0.1,
+            4.9
+          ],
+          "output_voltage_avg": 4.93367,
+          "output_voltage_std": 0.01806,
+          "num_measurements": 3
+        },
+        "10": {
+          "input_voltages": [
+            4.9,
+            0.1
+          ],
+          "output_voltage_avg": 1.334,
+          "output_voltage_std": 0.00735,
+          "num_measurements": 3
+        },
+        "11": {
+          "input_voltages": [
+            4.9,
+            4.9
+          ],
+          "output_voltage_avg": 4.81733,
+          "output_voltage_std": 0.04,
+          "num_measurements": 3
+        }
+      }
+    },
+    {
+      "wavelength": 1551.6,
+      "timestamp": "2025-06-16T14:05:57.633556",
+      "measurements": {
+        "00": {
+          "input_voltages": [
+            0.1,
+            0.1
+          ],
+          "output_voltage_avg": 1.20133,
+          "output_voltage_std": 0.01461,
+          "num_measurements": 3
+        },
+        "01": {
+          "input_voltages": [
+            0.1,
+            4.9
+          ],
+          "output_voltage_avg": 5.32667,
+          "output_voltage_std": 0.08345,
+          "num_measurements": 3
+        },
+        "10": {
+          "input_voltages": [
+            4.9,
+            0.1
+          ],
+          "output_voltage_avg": 1.727,
+          "output_voltage_std": 0.0,
+          "num_measurements": 3
+        },
+        "11": {
+          "input_voltages": [
+            4.9,
+            4.9
+          ],
+          "output_voltage_avg": 5.03033,
+          "output_voltage_std": 0.06758,
+          "num_measurements": 3
+        }
+      }
+    },
+    {
+      "wavelength": 1552.0,
+      "timestamp": "2025-06-16T14:06:20.918363",
+      "measurements": {
+        "00": {
+          "input_voltages": [
+            0.1,
+            0.1
+          ],
+          "output_voltage_avg": 1.932,
+          "output_voltage_std": 0.01944,
+          "num_measurements": 3
+        },
+        "01": {
+          "input_voltages": [
+            0.1,
+            4.9
+          ],
+          "output_voltage_avg": 5.62233,
+          "output_voltage_std": 0.03633,
+          "num_measurements": 3
+        },
+        "10": {
+          "input_voltages": [
+            4.9,
+            0.1
+          ],
+          "output_voltage_avg": 2.20867,
+          "output_voltage_std": 0.02549,
+          "num_measurements": 3
+        },
+        "11": {
+          "input_voltages": [
+            4.9,
+            4.9
+          ],
+          "output_voltage_avg": 4.37133,
+          "output_voltage_std": 0.03427,
+          "num_measurements": 3
+        }
+      }
+    }
+  ]
+}
