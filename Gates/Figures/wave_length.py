@@ -111,12 +111,13 @@ def plot_simple_extinction_ratios(file_path, method='worst_case', sheet_name=Non
         er_values = calculate_extinction_ratio_for_gate(gate_data, wavelength_cols, method)
         
         # Create bar chart
-        bars = ax.bar(wavelengths, er_values, color='steelblue', alpha=0.8, width=0.15)
-        
+        bar_colors = ['darkorange' if float(w) == 1550.0 else 'steelblue' for w in wavelengths]
+        bars = ax.bar(wavelengths, er_values, color=bar_colors, alpha=0.8, width=0.15)
+
         # Customize the plot
-        ax.set_xlabel('Wavelength (nm)', fontsize=12)
-        ax.set_ylabel('Extinction Ratio (dB)', fontsize=12)
-        ax.set_title(f'Extinction Ratio vs Wavelength for {gate} Gate', fontsize=12, fontweight='bold')
+        ax.set_xlabel('Wavelength (nm)', fontsize=16)
+        ax.set_ylabel('Extinction Ratio (dB)', fontsize=16)
+        ax.set_title(f'{gate}', fontsize=16, fontweight='bold')
         ax.grid(True, alpha=0.3, axis='y')
         ax.tick_params(axis='both', labelsize=10)
         ax.tick_params(axis='x', rotation=45)
