@@ -202,7 +202,7 @@ class BayesianLogicGateOptimizer:
         # Reward higher absolute output levels for better SNR
         mean_high = sum(high_outputs) / len(high_outputs)
         strength_score = 20 * min(1.0, mean_high / 3.0)  # Scale to 3V max
-        
+            
         # === CONSISTENCY (10 points) ===
         # Reward consistent outputs within each logic state
         high_std = np.std(high_outputs) if len(high_outputs) > 1 else 0
