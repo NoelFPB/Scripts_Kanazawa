@@ -325,16 +325,34 @@ class DualWavelengthOptimizer:
         # Extra penalty for HIGH output variation
         if len(high_outputs) > 1:
             high_range = max(high_outputs) - min(high_outputs)
-            high_consistency_penalty = -20 * min(1.0, high_range / 1.0)  # -20 points for 1V+ variation
+            
+            if high_range > 1:  # Anything >0.5V is problematic
+                # Severe penalty that grows with range
+                high_consistency_penalty = -30 * (high_range / 0.5)  # -60 points per 0.5V
+                # For 6.9V range: -60 × (6.9/0.5) = -828 points!
+            else:
+                # Gentle penalty for small variations
+                high_consistency_penalty = -20 * (high_range / 0.5)  # Linear up to 0.5V
+            
             total_score += high_consistency_penalty
 
         if len(low_outputs) > 1:
             low_range = max(low_outputs) - min(low_outputs)
-            low_consistency_penalty = -20 * min(1.0, low_range / 1.0)  # -20 points for 1V+ variation
+            
+            if low_range > 1:  # LOW outputs should be even more consistent than HIGH
+                # Severe penalty that grows with range
+                low_consistency_penalty = -30 * (low_range / 0.5)  # -80 points per 0.3V
+                # For 0.6V range: -80 × (0.6/0.3) = -160 points
+            else:
+                # Gentle penalty for small variations
+                low_consistency_penalty = -20 * (low_range / 0.5)  # Linear up to 0.3V
+                # For 0.15V range: -25 × (0.15/0.3) = -12.5 points
+            
             total_score += low_consistency_penalty
 
         # Cap at 100 points
         final_score = min(100, max(-50, total_score))
+        #final_score = total_score
         
         return final_score
 
@@ -1004,16 +1022,10 @@ class DualWavelengthOptimizer:
         print("=" * 60)
         
         try:
-            # Phase 1: Initial sampling (batch mode)
-            print(f"\nPHASE 1: Initial Sampling")
             self.initial_sampling(n_samples=30)
-
-            # Phase 2: Bayesian Optimization
-            print(f"\nPHASE 2: Bayesian Optimization")
             self.bayesian_optimize(n_iterations=30, initial_random=0, batch_size=10)
-            
-            # Phase 3: Focused search around best
-            print(f"\nPHASE 3: Focused Search")
+            self.focused_search_around_best(n_variations=10)
+            self.bayesian_optimize(n_iterations=40, initial_random=0, batch_size=10)
             self.focused_search_around_best(n_variations=10)
             
             # Phase 4: Final testing
