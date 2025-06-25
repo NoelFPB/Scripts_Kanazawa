@@ -4,7 +4,6 @@ import pyvisa
 import numpy as np
 import random
 import pickle
-import json
 import os
 from datetime import datetime
 from scipy.stats import qmc
@@ -36,18 +35,16 @@ TEST_CONFIGURATIONS = [
 
 class BayesianDecoderOptimizer:
 
-    def __init__(self, save_dir="bayesian_models"):
-        print("Initializing improved Bayesian decoder optimization...")
+    def __init__(self):
+        print("Initializing Bayesian decoder optimization...")
         
-        # Create save directory
-        self.save_dir = save_dir
-        os.makedirs(save_dir, exist_ok=True)
+        # Simple save file
+        self.save_file = "decoder_model.pkl"
         
         # Bayesian optimization storage
         self.X_evaluated = []  # Configuration vectors
         self.y_evaluated = []  # Scores
         self.gp = None        # Gaussian Process model
-        self.optimization_history = []  # Track optimization progress
         
         # Initialize hardware connections
         self.scope = self._init_scope()
@@ -57,9 +54,6 @@ class BayesianDecoderOptimizer:
         # Best configuration found
         self.best_config = None
         self.best_score = float('-inf')
-        
-        # Session tracking
-        self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.total_evaluations = 0
 
         self.base_config = {}
@@ -69,225 +63,53 @@ class BayesianDecoderOptimizer:
             if h not in INPUT_PINS:
                 self.base_config[h] = 0.01
 
-    def save_state(self, filename=None):
-        """Save the complete optimization state"""
-        if filename is None:
-            filename = f"bayesian_state_{self.session_id}.pkl"
-        
-        filepath = os.path.join(self.save_dir, filename)
-        
-        # Prepare state dictionary
+        # Try to load existing model
+        self.load_model()
+
+    def save_model(self):
+        """Save the complete model state"""
         state = {
             'X_evaluated': self.X_evaluated,
             'y_evaluated': self.y_evaluated,
             'best_config': self.best_config,
             'best_score': self.best_score,
-            'optimization_history': self.optimization_history,
             'total_evaluations': self.total_evaluations,
-            'session_id': self.session_id,
-            'timestamp': datetime.now().isoformat(),
-            'modifiable_heaters': MODIFIABLE_HEATERS,
-            'v_min': V_MIN,
-            'v_max': V_MAX
+            # Don't save GP model to avoid version conflicts
+            'gp': None  
         }
         
-        # Save the Gaussian Process model separately (if it exists)
-        if self.gp is not None:
-            gp_filepath = os.path.join(self.save_dir, f"gp_model_{self.session_id}.pkl")
-            with open(gp_filepath, 'wb') as f:
-                pickle.dump(self.gp, f)
-            state['gp_model_file'] = f"gp_model_{self.session_id}.pkl"
-        
-        # Save main state
-        with open(filepath, 'wb') as f:
+        with open(self.save_file, 'wb') as f:
             pickle.dump(state, f)
         
-        # Also save a human-readable summary
-        summary_filepath = os.path.join(self.save_dir, f"summary_{self.session_id}.json")
-        summary = {
-            'session_id': self.session_id,
-            'total_evaluations': self.total_evaluations,
-            'best_score': float(self.best_score) if self.best_score != float('-inf') else None,
-            'best_config': self.best_config,
-            'data_points': len(self.X_evaluated),
-            'timestamp': datetime.now().isoformat(),
-            'score_history': [float(score) for score in self.y_evaluated[-20:]]  # Last 20 scores
-        }
-        
-        with open(summary_filepath, 'w') as f:
-            json.dump(summary, f, indent=2)
-        
-        print(f"State saved to: {filepath}")
-        print(f"Summary saved to: {summary_filepath}")
-        if self.gp is not None:
-            print(f"GP model saved separately")
-        
-        return filepath
+        print(f"Model saved with {len(self.X_evaluated)} data points, best score: {self.best_score:.2f}")
 
-    def load_state(self, filepath=None, session_id=None):
-        """Load a previous optimization state"""
-        if filepath is None:
-            if session_id is None:
-                # Find the most recent state file
-                state_files = [f for f in os.listdir(self.save_dir) if f.startswith('bayesian_state_') and f.endswith('.pkl')]
-                if not state_files:
-                    print("No saved states found.")
-                    return False
-                filepath = os.path.join(self.save_dir, max(state_files))
-            else:
-                filepath = os.path.join(self.save_dir, f"bayesian_state_{session_id}.pkl")
-        
-        if not os.path.exists(filepath):
-            print(f"State file not found: {filepath}")
-            return False
-        
-        try:
-            with open(filepath, 'rb') as f:
-                state = pickle.load(f)
-            
-            # Restore state
-            self.X_evaluated = state['X_evaluated']
-            self.y_evaluated = state['y_evaluated']
-            self.best_config = state['best_config']
-            self.best_score = state['best_score']
-            self.optimization_history = state.get('optimization_history', [])
-            self.total_evaluations = state.get('total_evaluations', len(self.y_evaluated))
-            
-            # Load GP model if available
-            if 'gp_model_file' in state:
-                gp_filepath = os.path.join(self.save_dir, state['gp_model_file'])
-                if os.path.exists(gp_filepath):
-                    with open(gp_filepath, 'rb') as f:
-                        self.gp = pickle.load(f)
-                    print("Gaussian Process model loaded successfully!")
-                else:
-                    print("GP model file not found, will retrain from data")
-                    self.fit_gaussian_process()
-            else:
-                print("No GP model in saved state, will retrain from data")
-                if len(self.X_evaluated) >= 3:
-                    self.fit_gaussian_process()
-            
-            print(f"State loaded successfully from: {filepath}")
-            print(f"Loaded {len(self.X_evaluated)} data points")
-            print(f"Best score so far: {self.best_score:.2f}")
-            print(f"Total evaluations: {self.total_evaluations}")
-            
-            return True
-            
-        except Exception as e:
-            print(f"Error loading state: {e}")
-            return False
-
-    def list_saved_states(self):
-        """List all available saved states"""
-        state_files = [f for f in os.listdir(self.save_dir) if f.startswith('bayesian_state_') and f.endswith('.pkl')]
-        summary_files = [f for f in os.listdir(self.save_dir) if f.startswith('summary_') and f.endswith('.json')]
-        
-        print(f"\nAvailable saved states in {self.save_dir}:")
-        print("-" * 80)
-        
-        for summary_file in sorted(summary_files):
-            summary_path = os.path.join(self.save_dir, summary_file)
+    def load_model(self):
+        """Load existing model if available"""
+        if os.path.exists(self.save_file):
             try:
-                with open(summary_path, 'r') as f:
-                    summary = json.load(f)
-                
-                session_id = summary['session_id']
-                best_score = summary.get('best_score', 'N/A')
-                data_points = summary.get('data_points', 0)
-                timestamp = summary.get('timestamp', 'Unknown')
-                
-                print(f"Session ID: {session_id}")
-                print(f"  Best Score: {best_score}")
-                print(f"  Data Points: {data_points}")
-                print(f"  Timestamp: {timestamp}")
-                print()
-                
-            except Exception as e:
-                print(f"Error reading {summary_file}: {e}")
-
-    def merge_states(self, filepaths):
-        """Merge multiple saved states into the current one"""
-        print(f"Merging {len(filepaths)} saved states...")
-        
-        all_X = []
-        all_y = []
-        best_overall_score = self.best_score
-        best_overall_config = self.best_config
-        
-        for filepath in filepaths:
-            try:
-                with open(filepath, 'rb') as f:
+                with open(self.save_file, 'rb') as f:
                     state = pickle.load(f)
                 
-                # Add data points
-                all_X.extend(state['X_evaluated'])
-                all_y.extend(state['y_evaluated'])
+                self.X_evaluated = state['X_evaluated']
+                self.y_evaluated = state['y_evaluated']
+                self.best_config = state['best_config']
+                self.best_score = state['best_score']
+                self.total_evaluations = state.get('total_evaluations', len(self.y_evaluated))
+                # Always retrain GP from data (don't load saved GP)
+                self.gp = None
                 
-                # Update best if better
-                if state['best_score'] > best_overall_score:
-                    best_overall_score = state['best_score']
-                    best_overall_config = state['best_config']
+                print(f"Loaded existing model: {len(self.X_evaluated)} data points, best score: {self.best_score:.2f}")
+                print("Will retrain GP from loaded data...")
                 
-                print(f"  Loaded {len(state['X_evaluated'])} points from {os.path.basename(filepath)}")
+                # Retrain GP immediately if we have enough data
+                if len(self.X_evaluated) >= 3:
+                    self.fit_gaussian_process()
                 
             except Exception as e:
-                print(f"  Error loading {filepath}: {e}")
-        
-        # Update current state
-        self.X_evaluated.extend(all_X)
-        self.y_evaluated.extend(all_y)
-        self.best_score = best_overall_score
-        self.best_config = best_overall_config
-        self.total_evaluations = len(self.y_evaluated)
-        
-        # Remove duplicates (configurations that are very similar)
-        self._remove_duplicates()
-        
-        # Retrain GP with merged data
-        if len(self.X_evaluated) >= 3:
-            self.fit_gaussian_process()
-        
-        print(f"Merge complete! Total data points: {len(self.X_evaluated)}")
-        print(f"Best score: {self.best_score:.2f}")
-
-    def _remove_duplicates(self, tolerance=1e-3):
-        """Remove duplicate or very similar configurations"""
-        if len(self.X_evaluated) <= 1:
-            return
-        
-        X = np.array(self.X_evaluated)
-        y = np.array(self.y_evaluated)
-        
-        # Find unique configurations
-        unique_mask = np.ones(len(X), dtype=bool)
-        
-        for i in range(len(X)):
-            if not unique_mask[i]:
-                continue
-            for j in range(i + 1, len(X)):
-                if unique_mask[j] and np.allclose(X[i], X[j], atol=tolerance):
-                    # Keep the one with better score
-                    if y[j] > y[i]:
-                        unique_mask[i] = False
-                        break
-                    else:
-                        unique_mask[j] = False
-        
-        # Update data
-        original_count = len(self.X_evaluated)
-        self.X_evaluated = [self.X_evaluated[i] for i in range(len(self.X_evaluated)) if unique_mask[i]]
-        self.y_evaluated = [self.y_evaluated[i] for i in range(len(self.y_evaluated)) if unique_mask[i]]
-        
-        removed_count = original_count - len(self.X_evaluated)
-        if removed_count > 0:
-            print(f"Removed {removed_count} duplicate configurations")
-
-    def auto_save_callback(self):
-        """Automatically save state periodically"""
-        if len(self.y_evaluated) % 10 == 0:  # Save every 10 evaluations
-            self.save_state()
+                print(f"Error loading model: {e}")
+                print("Starting fresh...")
+        else:
+            print("No existing model found. Starting fresh...")
 
     def _init_scope(self):
         """Initialize oscilloscope for decoder output measurement"""
@@ -334,8 +156,161 @@ class BayesianDecoderOptimizer:
         except Exception as e:
             print(f"Measurement error: {e}")
             return [None] * 4
+        
+    
+    def evaluate_configuration(self, config):
+        """
+        Hybrid decoder scoring: Focus on extinction ratio but provide gradient guidance
+        for complex decoder optimization landscape
+        """
+        
+        # Collect all measurements for analysis
+        all_active_outputs = []    # Outputs that should be HIGH
+        all_inactive_outputs = []  # Outputs that should be LOW
+        test_results = []
+        
+        for test_idx, test_config in enumerate(TEST_CONFIGURATIONS):
+            input_a, input_b = test_config
+            expected_active_idx = test_idx  # Channel that should be active
+            
+            # Configure inputs and measure
+            current_config = config.copy()
+            current_config[INPUT_PINS[0]] = input_a
+            current_config[INPUT_PINS[1]] = input_b
+            
+            self.send_heater_values(current_config)
+            time.sleep(0.20)
+            
+            outputs = self.measure_outputs()
+            if None in outputs:
+                return -1000  # Hardware failure
+            
+            # Separate active and inactive outputs
+            active_output = outputs[expected_active_idx]
+            inactive_outputs = [outputs[i] for i in range(4) if i != expected_active_idx]
+            
+            all_active_outputs.append(active_output)
+            all_inactive_outputs.extend(inactive_outputs)
+            
+            test_results.append({
+                'input': test_config,
+                'expected_active': expected_active_idx,
+                'outputs': outputs,
+                'active_output': active_output,
+                'inactive_outputs': inactive_outputs
+            })
+        
+        if len(all_active_outputs) != 4 or len(all_inactive_outputs) != 12:
+            return -500  # Missing measurements
+        
+        # Basic statistics
+        min_active = min(all_active_outputs)
+        max_inactive = max(all_inactive_outputs)
+        mean_active = np.mean(all_active_outputs)
+        mean_inactive = np.mean(all_inactive_outputs)
+        separation = min_active - max_inactive
+        
+        # === PRIMARY METRIC: EXTINCTION RATIO (50 points) ===
+        if separation > 0:
+            # Working decoder - extinction ratio scoring
+            er_linear = min_active / max(max_inactive, 0.001)
+            er_db = 10 * np.log10(er_linear)
+            
+            if er_db < 1:
+                er_score = 25 * er_db  # 0→25 for 0-1dB
+            elif er_db < 3:
+                er_score = 25 + 15 * (er_db - 1) / 2  # 25→40 for 1-3dB
+            elif er_db < 5:
+                er_score = 40 + 8 * (er_db - 3) / 2   # 40→48 for 3-5dB
+            else:
+                er_score = 48 + 2 * (1 - np.exp(-(er_db - 5) / 3))  # 48→50 for 5+dB
+        else:
+            # No separation - but still provide gradient based on gap size
+            er_score = -20 + 15 * max(0, (separation + 2.0) / 2.0)  # -20 to -5 as gap closes
+        
+        # === SEPARATION GRADIENT (25 points) ===
+        # Always reward moving toward separation, even if not there yet
+        mean_separation = mean_active - mean_inactive
+        
+        if mean_separation > 0:
+            # Moving in right direction
+            sep_score = 20 * min(1.0, mean_separation / 2.0)  # 0→20 for 0-2V mean separation
+            
+            # Bonus for actual worst-case separation
+            if separation > 0:
+                sep_score += 5 * min(1.0, separation / 1.0)  # +0→5 for 0-1V worst-case separation
+        else:
+            # Wrong direction but still provide gradient
+            sep_score = -10 + 10 * max(0, (mean_separation + 2.0) / 2.0)  # -10 to 0 as approaches zero
+        
+        # === SIGNAL STRENGTH (15 points) ===
+        # Reward higher active outputs for better SNR
+        strength_score = 15 * min(1.0, mean_active / 4.0)
+        
+        # === CONSISTENCY (10 points) ===
+        # Reward consistent outputs within each group
+        active_std = np.std(all_active_outputs)
+        inactive_std = np.std(all_inactive_outputs)
+        avg_std = (active_std + inactive_std) / 2
+        consistency_score = 10 * np.exp(-avg_std * 3)  # Slightly more forgiving than before
+        
+        # === DIRECTIONALITY BONUS (EXTRA GRADIENT) ===
+        # Reward configurations where most actives > most inactives (even if not perfect)
+        correct_pairs = 0
+        total_pairs = 0
+        
+        for active_val in all_active_outputs:
+            for inactive_val in all_inactive_outputs:
+                total_pairs += 1
+                if active_val > inactive_val:
+                    correct_pairs += 1
+        
+        if total_pairs > 0:
+            directionality = correct_pairs / total_pairs
+            direction_bonus = 10 * directionality  # 0→10 points for getting direction right
+        else:
+            direction_bonus = 0
+        
+        # === COMBINE SCORES ===
+        total_score = er_score + sep_score + strength_score + consistency_score + direction_bonus
+        
+        # Less aggressive penalties than before (keep gradient)
+        if len(all_active_outputs) > 1:
+            active_range = max(all_active_outputs) - min(all_active_outputs)
+            active_penalty = -10 * min(1.0, active_range / 2.0)  # Less harsh penalty
+            total_score += active_penalty
 
-    def evaluate_configuration(self, config):       
+        if len(all_inactive_outputs) > 1:
+            inactive_range = max(all_inactive_outputs) - min(all_inactive_outputs)
+            inactive_penalty = -5 * min(1.0, inactive_range / 2.0)  # Less harsh penalty
+            total_score += inactive_penalty
+        
+        # Wider range to maintain gradient
+        final_score = min(100, max(-30, total_score))
+        
+        # Enhanced debug output
+        if final_score > self.best_score:
+            print(f"  === NEW BEST DECODER CONFIGURATION ===")
+            if separation > 0:
+                er_linear = min_active / max_inactive
+                er_db = 10 * np.log10(er_linear)
+                print(f"  ✅ WORKING DECODER!")
+                print(f"  Extinction Ratio: {er_db:.2f}dB (linear: {er_linear:.1f})")
+            else:
+                print(f"  🔧 IMPROVING (not working yet)")
+                print(f"  Worst-case gap: {separation:.3f}V")
+            
+            print(f"  Mean separation: {mean_separation:.3f}V")
+            print(f"  ACTIVE: {[f'{h:.3f}V' for h in all_active_outputs]} (avg: {mean_active:.3f}V)")
+            print(f"  INACTIVE: {[f'{l:.3f}V' for l in all_inactive_outputs[:6]]}... (avg: {mean_inactive:.3f}V)")
+            print(f"  Directionality: {directionality:.1%} correct pairs")
+            print(f"  Score breakdown: ER={er_score:.1f}, Sep={sep_score:.1f}, Str={strength_score:.1f}, Cons={consistency_score:.1f}, Dir={direction_bonus:.1f}")
+            print(f"  Final Score: {final_score:.2f}")
+        
+        return final_score
+
+
+    def evaluate_configuration_non_simplified(self, config):       
         # Collect all measurements for analysis
         all_active_outputs = []    # Outputs that should be HIGH
         all_inactive_outputs = []  # Outputs that should be LOW
@@ -419,12 +394,17 @@ class BayesianDecoderOptimizer:
                 if er_linear > 1.1:  # At least 10% better
                     er_bonus = 5 * min(1.0, (er_linear - 1.0) / 2.0)
                     separation_score += er_bonus
+        
         else:
             # Overlapping groups - penalty based on overlap severity
             overlap = abs(separation)
             overlap_penalty = min(20, 20 * (overlap / max(overall_range, 0.1)))
             separation_score = -overlap_penalty
+
+
+
         
+
         # === METRIC 2: POLARIZATION REWARD (30 points) ===
         # Reward configurations that push outputs toward natural extremes
         polarization_score = 0
@@ -480,21 +460,12 @@ class BayesianDecoderOptimizer:
         # Apply gentle bounds (wider range for more exploration)
         final_score = min(100, max(-50, total_score))
         
-        # Update total evaluations counter
+        # Update counters
         self.total_evaluations += 1
         
-        # Track optimization history
-        self.optimization_history.append({
-            'evaluation': self.total_evaluations,
-            'score': final_score,
-            'separation': separation,
-            'active_mean': active_mean,
-            'inactive_mean': inactive_mean,
-            'timestamp': datetime.now().isoformat()
-        })
-        
-        # Auto-save periodically
-        self.auto_save_callback()
+        # Auto-save every 10 evaluations
+        if self.total_evaluations % 10 == 0:
+            self.save_model()
         
         # === DETAILED DEBUG OUTPUT FOR IMPROVEMENTS ===
         if final_score > self.best_score:
@@ -560,6 +531,9 @@ class BayesianDecoderOptimizer:
         )
         
         try:
+            # Clear any existing GP to avoid conflicts
+            self.gp = None
+            
             self.gp = GaussianProcessRegressor(
                 kernel=kernel,
                 n_restarts_optimizer=10,
@@ -574,19 +548,9 @@ class BayesianDecoderOptimizer:
             
         except Exception as e:
             print(f"    GP fitting failed: {e}")
+            print(f"    Continuing with random sampling...")
             self.gp = None
             return False
-
-    def acquisition_function(self, x, beta):  # Pass beta as parameter
-        if self.gp is None:
-            return random.random()
-        
-        x = x.reshape(1, -1)
-        mu, sigma = self.gp.predict(x, return_std=True)
-        mu, sigma = mu[0], sigma[0]
-        
-        ucb = mu + beta * sigma  # Use provided beta
-        return ucb
 
     def initial_sampling(self, n_samples=50):
         """Improved initial sampling with more diverse patterns"""
@@ -681,20 +645,19 @@ class BayesianDecoderOptimizer:
                 # Predict scores for ALL candidates
                 mu, sigma = self.gp.predict(candidates, return_std=True)
                                 
+                # Smart beta selection based on progress
                 if self.best_score < 0:
-                    beta = 6.0    # High exploration when stuck in bad region
+                    beta = 7.0    # High exploration when stuck in bad region
                 elif self.best_score < 25:
                     beta = 5.0    # Moderate exploration for early progress  
-                elif self.best_score < 45:
-                    beta = 4.0    # Balanced exploration/exploitation
                 elif self.best_score < 70:
-                    beta = 3    # More exploitation as you find good solutions
-                elif self.best_score < 80:
-                    beta = 2.5    # Focus on refinement
+                    beta = 6.0    # Focus on refinement
+                elif self.best_score < 90:
+                    beta = 4.0    # Fine-tuning
                 else:
-                    beta = 2    # Fine-tuning for excellent solutions
+                    beta = 3    # Pure refinement
                 
-                # Vectorized (much faster)
+                # Vectorized acquisition function
                 ucb_scores = mu + beta * sigma
                 
                 print(f"Selected top {batch_size} candidates (β={beta}):")
@@ -738,7 +701,7 @@ class BayesianDecoderOptimizer:
         print(f"Final best score: {self.best_score:.2f}")
 
     def explore_around_best(self):
-        """Enhanced local exploration (your most successful strategy)"""
+        """Enhanced local exploration"""
         if not self.best_config:
             print("No best configuration available for local exploration.")
             return
@@ -748,9 +711,9 @@ class BayesianDecoderOptimizer:
         
         # Multiple exploration strategies
         strategies = [
-            {'name': 'coarse', 'range': 0.8, 'fraction': 0.4, 'samples': 7},    # Coarse search
-            {'name': 'medium', 'range': 0.3, 'fraction': 0.3, 'samples': 7},   # Medium search
-            {'name': 'fine', 'range': 0.1, 'fraction': 0.2, 'samples': 7},      # Fine tuning
+            {'name': 'coarse', 'range': 0.8, 'fraction': 0.4, 'samples': 5},    # Coarse search
+            {'name': 'medium', 'range': 0.4, 'fraction': 0.3, 'samples': 5},   # Medium search
+            {'name': 'fine', 'range': 0.2, 'fraction': 0.2, 'samples': 5},      # Fine tuning
         ]
         
         for strategy in strategies:
@@ -873,16 +836,28 @@ class BayesianDecoderOptimizer:
         self.scope.close()
         print("Connections closed.")
 
-    def optimize(self, resume_from_session=None):
-        """Main optimization function with optional resume capability"""
+    def smart_reset(self):
+        """Keep only the best data points and reset the rest"""
+        if len(self.y_evaluated) < 20:
+            return False
+            
+        # Keep top 20% of evaluations
+        n_keep = max(5, len(self.y_evaluated) // 5)
         
-        # Try to load previous state if requested
-        if resume_from_session:
-            if self.load_state(session_id=resume_from_session):
-                print(f"Resumed from session {resume_from_session}")
-                print(f"Starting from {len(self.X_evaluated)} data points, best score: {self.best_score:.2f}")
-            else:
-                print(f"Could not load session {resume_from_session}, starting fresh")
+        # Get indices of best scores
+        best_indices = np.argsort(self.y_evaluated)[-n_keep:]
+        
+        # Reset to only best data
+        self.X_evaluated = [self.X_evaluated[i] for i in best_indices]
+        self.y_evaluated = [self.y_evaluated[i] for i in best_indices]
+        
+        print(f"Smart reset: kept {n_keep} best evaluations")
+        self.fit_gaussian_process()
+        return True
+
+    def optimize(self):
+        """Main optimization function"""
+        #self.smart_reset()
         
         # Only do initial sampling if we don't have enough data
         if len(self.X_evaluated) < 30:
@@ -890,35 +865,20 @@ class BayesianDecoderOptimizer:
             print(f"Need {needed_samples} more initial samples...")
             self.initial_sampling(n_samples=needed_samples)
         
-        self.bayesian_optimize(n_iterations=10)  # Reduced iterations
-    
-        self.explore_around_best()  # More local exploration
-    
-        self.bayesian_optimize(n_iterations=15)  # Reduced iterations
-    
-        self.explore_around_best()  # More local exploration
+        self.bayesian_optimize(n_iterations=15)
+        self.explore_around_best()
 
-        self.bayesian_optimize(n_iterations=20)  # Reduced iterations
-    
-        self.explore_around_best()  # More local exploration
-
-        if self.best_score > 60:
-            self.bayesian_optimize(n_iterations=20)  # Reduced iterations        
-            self.explore_around_best()  # More local exploration
-    
-        if self.best_score > 80:
-            self.bayesian_optimize(n_iterations=20)  # Reduced iterations        
-            self.explore_around_best()  # More local exploration
+        self.bayesian_optimize(n_iterations=15)
+        self.explore_around_best()
 
         self.test_final_configuration()
         
         # Final save
-        final_save_path = self.save_state()
+        self.save_model()
         
         print(f"\nOptimization complete!")
         print(f"Best score: {self.best_score:.2f}")
         print(f"Total evaluations: {len(self.y_evaluated)}")
-        print(f"Final state saved to: {final_save_path}")
         print("\nFinal heater configuration:")
         print(self.format_config())
         
@@ -927,39 +887,18 @@ class BayesianDecoderOptimizer:
 
 def main():
     start_time = time.time()
-    
-    # Parse command line arguments for resume functionality
-    import sys
-    
-    resume_session = None
-    if len(sys.argv) > 1:
-        if sys.argv[1] == '--list':
-            optimizer = BayesianDecoderOptimizer()
-            optimizer.list_saved_states()
-            return
-        elif sys.argv[1] == '--resume' and len(sys.argv) > 2:
-            resume_session = sys.argv[2]
-        elif sys.argv[1] == '--merge' and len(sys.argv) > 2:
-            optimizer = BayesianDecoderOptimizer()
-            # Load multiple state files and merge them
-            state_files = sys.argv[2:]
-            state_paths = [os.path.join(optimizer.save_dir, f) for f in state_files]
-            optimizer.merge_states(state_paths)
-            optimizer.save_state(f"merged_{optimizer.session_id}.pkl")
-            return
-    
     optimizer = BayesianDecoderOptimizer()
     
     try:
-        optimizer.optimize(resume_from_session=resume_session)
+        optimizer.optimize()
     except KeyboardInterrupt:
         print("\nOptimization interrupted by user")
         print("Saving current state...")
-        optimizer.save_state(f"interrupted_{optimizer.session_id}.pkl")
+        optimizer.save_model()
     except Exception as e:
         print(f"Error: {e}")
         print("Saving current state...")
-        optimizer.save_state(f"error_{optimizer.session_id}.pkl")
+        optimizer.save_model()
     finally:
         try:
             optimizer.cleanup()
