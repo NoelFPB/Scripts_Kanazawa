@@ -13,7 +13,7 @@ from sklearn.gaussian_process.kernels import RBF, WhiteKernel, ConstantKernel
 import random
 
 # Serial port configuration 
-SERIAL_PORT = 'COM4'
+SERIAL_PORT = 'COM3'
 BAUD_RATE = 115200
 
 # === DUAL GATE CONFIGURATION ===
@@ -39,6 +39,7 @@ INPUT_COMBINATIONS = [
 
 # Laser control
 LASER_ADDRESS = "GPIB0::6::INSTR"
+
 
 def generate_truth_table(gate_type):
     """Generate truth table for given gate type"""

@@ -1,20 +1,126 @@
 import pyvisa
 import time
 
-def run_laser_sequence():
+def find_laser_device():
+    """
+    Scan for available VISA resources and find the laser
+    """
+    print("=== Scanning for VISA Resources ===")
+    try:
+        rm = pyvisa.ResourceManager()
+        resources = rm.list_resources()
+        
+        print(f"Found {len(resources)} VISA resources:")
+        for i, resource in enumerate(resources):
+            print(f"  {i+1}. {resource}")
+        
+        if not resources:
+            print("❌ No VISA resources found!")
+            print("\nTroubleshooting steps:")
+            print("1. Check USB cable connection")
+            print("2. Verify laser is powered on")
+            print("3. Install/reinstall VISA drivers")
+            print("4. Try different USB port")
+            return None
+            
+        # Look for likely laser candidates
+        laser_candidates = []
+        for resource in resources:
+            # Common patterns for ALnair or similar devices
+            if any(pattern in resource.upper() for pattern in ['USB', 'GPIB', 'TCPIP', '0610', 'ALNAIR']):
+                laser_candidates.append(resource)
+        
+        if laser_candidates:
+            print(f"\nPossible laser devices: {laser_candidates}")
+            return laser_candidates
+        else:
+            print("\nNo obvious laser candidates found. All resources listed above.")
+            return resources
+            
+    except Exception as e:
+        print(f"❌ Error scanning resources: {e}")
+        return None
+
+def test_connection(resource_string):
+    """
+    Test connection to a specific resource
+    """
+    print(f"\n--- Testing connection to: {resource_string} ---")
+    try:
+        rm = pyvisa.ResourceManager()
+        device = rm.open_resource(resource_string)
+        device.timeout = 5000
+        device.write_termination = ''
+        device.read_termination = ''
+        
+        # Try to get device identification
+        try:
+            device.write('*IDN?')
+            time.sleep(0.5)
+            response = device.read()
+            print(f"✅ Device responded: {response}")
+            device.close()
+            return True
+        except:
+            # If *IDN? doesn't work, try ALnair specific commands
+            try:
+                device.write('LS?')  # Status query
+                time.sleep(0.5)
+                response = device.read()
+                print(f"✅ ALnair device confirmed: {response}")
+                device.close()
+                return True
+            except:
+                print("❌ Device doesn't respond to standard queries")
+                device.close()
+                return False
+                
+    except Exception as e:
+        print(f"❌ Connection failed: {e}")
+        return False
+
+def auto_find_laser():
+    """
+    Automatically find and connect to the laser
+    """
+    print("=== Auto-detecting ALnair TLG220 ===")
+    
+    # First, scan for resources
+    candidates = find_laser_device()
+    if not candidates:
+        return None
+    
+    # Test each candidate
+    for resource in candidates:
+        if test_connection(resource):
+            print(f"🎯 Found working laser at: {resource}")
+            return resource
+    
+    print("❌ No working laser connection found")
+    return None
+
+def run_laser_sequence(resource_string=None):
     """
     Fully automated laser sequence using confirmed working commands
     """
     
-    print("=== ALnair TLG 220 Automated Sequence ===")
+    print("=== ALnair TLG220 Automated Sequence ===")
+    
+    # Auto-detect if no resource specified
+    if resource_string is None:
+        resource_string = auto_find_laser()
+        if resource_string is None:
+            print("❌ Cannot proceed without valid connection")
+            return
     
     # Connect to laser
     try:
-        laser = pyvisa.ResourceManager().open_resource('"GPIB0::6::INSTR')
+        rm = pyvisa.ResourceManager()
+        laser = rm.open_resource(resource_string)
         laser.timeout = 5000
         laser.write_termination = ''
         laser.read_termination = ''
-        print("✅ Connected to laser")
+        print(f"✅ Connected to laser at {resource_string}")
     except Exception as e:
         print(f"❌ Connection failed: {e}")
         return
@@ -59,7 +165,7 @@ def run_laser_sequence():
         print("--- Step 2: 1552nm sequence ---")
         
         print("Setting wavelength to 1552nm...")
-        laser.write('LW1550nm')
+        laser.write('LW1552nm')  # Fixed: was 1550nm, should be 1552nm
         time.sleep(2)
         
         # Verify wavelength
@@ -109,21 +215,34 @@ def run_laser_sequence():
         print(f"❌ Sequence failed: {e}")
     
     finally:
+        try:
+            laser.write('LE0')  # Safety: ensure laser is off
+            print("🛡️ Laser turned OFF for safety")
+        except:
+            pass
         laser.close()
         print("✅ Disconnected from laser")
 
-def interactive_laser_control():
+def interactive_laser_control(resource_string=None):
     """
     Interactive control using the discovered commands
     """
     
+    # Auto-detect if no resource specified
+    if resource_string is None:
+        resource_string = auto_find_laser()
+        if resource_string is None:
+            print("❌ Cannot proceed without valid connection")
+            return
+    
     # Connect to laser
     try:
-        laser = pyvisa.ResourceManager().open_resource('GPIB0::6::INSTR')
+        rm = pyvisa.ResourceManager()
+        laser = rm.open_resource(resource_string)
         laser.timeout = 5000
         laser.write_termination = ''
         laser.read_termination = ''
-        print("✅ Connected to laser")
+        print(f"✅ Connected to laser at {resource_string}")
     except Exception as e:
         print(f"❌ Connection failed: {e}")
         return
@@ -182,7 +301,7 @@ def interactive_laser_control():
                     
             elif choice == '6':
                 laser.close()
-                run_laser_sequence()
+                run_laser_sequence(resource_string)
                 return
                 
             elif choice == '7':
@@ -196,23 +315,58 @@ def interactive_laser_control():
     
     finally:
         try:
-            #laser.write('LE0')  # Safety: turn off laser
+            laser.write('LE0')  # Safety: turn off laser
             print("🛡️ Laser turned OFF for safety")
         except:
             pass
         laser.close()
         print("✅ Disconnected")
 
-if __name__ == "__main__":
-    print("Choose mode:")
-    print("1. Run automated sequence (1550nm → 1552nm)")
-    print("2. Interactive control")
+def manual_connection_test():
+    """
+    Manually test connection with user-provided resource string
+    """
+    print("=== Manual Connection Test ===")
+    resource_string = input("Enter VISA resource string (e.g., 'USB0::0x1AB1::0x0610::HDO1B244000779::INSTR'): ").strip()
     
-    choice = input("Enter 1 or 2: ").strip()
+    if test_connection(resource_string):
+        print("✅ Connection successful!")
+        
+        use_device = input("Use this device? (y/n): ").strip().lower()
+        if use_device == 'y':
+            return resource_string
+    else:
+        print("❌ Connection failed")
+    
+    return None
+
+if __name__ == "__main__":
+    print("=== ALnair TLG220 Laser Control ===")
+    print("Choose mode:")
+    print("1. Auto-detect and run sequence")
+    print("2. Auto-detect and interactive control")
+    print("3. Scan for devices only")
+    print("4. Manual connection test")
+    print("5. Run sequence with known resource")
+    
+    choice = input("Enter 1-5: ").strip()
     
     if choice == "1":
         run_laser_sequence()
     elif choice == "2":
         interactive_laser_control()
+    elif choice == "3":
+        find_laser_device()
+    elif choice == "4":
+        resource = manual_connection_test()
+        if resource:
+            mode = input("Run sequence (s) or interactive (i)? ").strip().lower()
+            if mode == 's':
+                run_laser_sequence(resource)
+            elif mode == 'i':
+                interactive_laser_control(resource)
+    elif choice == "5":
+        resource = input("Enter resource string: ").strip()
+        run_laser_sequence(resource)
     else:
         print("Invalid choice")
