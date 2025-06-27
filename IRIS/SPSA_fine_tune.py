@@ -161,7 +161,7 @@ class SerialController:
         return correct / total if total > 0 else 0
 
     def fine_tune(self, initial_config, config_manager, data_processor, oscilloscope, 
-                 learning_rate=0.05, iterations=30, patience=10):
+                 learning_rate=0.05, iterations=10, patience=3):
         """Fine-tune the configuration using a more focused approach"""
         print("\nStarting Fine-tuning Phase...")
         

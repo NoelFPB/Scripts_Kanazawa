@@ -111,7 +111,7 @@ class DataProcessor:
         return {k: round(float(v), 2) for k, v in config.items()}
 
 class SerialController:
-    def __init__(self, port='COM4', baudrate=115200):
+    def __init__(self, port='COM3', baudrate=115200):
         self.port = port
         self.baudrate = baudrate
         self.ser = None
@@ -233,9 +233,7 @@ class SerialController:
 def main():
     oscilloscope = OscilloscopeController()
     config_manager = ConfigurationManager()
-    data_processor = DataProcessor(
-        csv_path='C:\\Users\\noelp\\Documents\\Kanazawa\\Scripts_Kanazawa\\IRIS\\Datasets\\iris_normalized.csv'
-    )
+    data_processor = DataProcessor(csv_path='C:\\Users\\Noel\\Documents\\Scripts_Kanazawa\\IRIS\\Datasets\\iris_normalized.csv')
     serial_controller = SerialController()
 
     # Setup connections
