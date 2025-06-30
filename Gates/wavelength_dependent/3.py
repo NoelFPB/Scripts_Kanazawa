@@ -307,15 +307,26 @@ class ImprovedDualWavelengthOptimizer:
             # Signal strength bonus (favor stronger signals)
             strength_bonus = 10 * np.tanh(mean_high / 2.5)
             
-            # Consistency bonus
+            # IMPROVED CONSISTENCY SCORING
             high_std = np.std(high_outputs) if len(high_outputs) > 1 else 0
             low_std = np.std(low_outputs) if len(low_outputs) > 1 else 0
-            consistency_penalty = -5 * (high_std + low_std)
+            
+            # More aggressive consistency penalty - scale with signal levels
+            high_cv = high_std / max(mean_high, 0.1)  # Coefficient of variation
+            low_cv = low_std / max(mean_low, 0.1)
+            
+            # Stronger penalty for inconsistency, especially for high outputs
+            consistency_penalty = -15 * high_cv - 10 * low_cv - 5 * (high_std + low_std)
+            
+            # Additional penalty if range of highs or lows is too large
+            high_range = max(high_outputs) - min(high_outputs) if len(high_outputs) > 1 else 0
+            low_range = max(low_outputs) - min(low_outputs) if len(low_outputs) > 1 else 0
+            range_penalty = -10 * np.tanh(high_range / 0.5) - 5 * np.tanh(low_range / 0.3)
             
             # Separation bonus
             separation_bonus = 5 * np.tanh(separation / 0.5)
             
-            total_score = er_score + strength_bonus + separation_bonus + consistency_penalty
+            total_score = er_score + strength_bonus + separation_bonus + consistency_penalty + range_penalty
             
         else:
             # Overlapping levels - heavy penalty
@@ -355,9 +366,9 @@ class ImprovedDualWavelengthOptimizer:
             self.send_heater_values(current_config)
             time.sleep(0.2)
             
-            # Take multiple measurements for better accuracy
+            # Take MORE measurements for better consistency assessment
             measurements = []
-            for _ in range(3):
+            for _ in range(5):  # Increased from 3 to 5
                 measurements.append(self.measure_output())
                 time.sleep(0.05)
             
@@ -365,7 +376,8 @@ class ImprovedDualWavelengthOptimizer:
             detailed_results[input_state] = {
                 'output': output, 
                 'expected_high': expected_high,
-                'measurements': measurements
+                'measurements': measurements,
+                'std': np.std(measurements)  # Track measurement consistency
             }
             
             if expected_high:
@@ -376,101 +388,121 @@ class ImprovedDualWavelengthOptimizer:
         score = self.calculate_extinction_ratio_score(high_outputs, low_outputs)
         return score, detailed_results
 
-    def evaluate_configs_dual_wavelength(self, configs):
-        print(f"\nDual-wavelength evaluation of {len(configs)} configurations...")
+    def evaluate_configs_dual_wavelength_batched(self, configs, batch_size=10):
+        """
+        IMPROVED: Evaluate configs in batches to reduce wavelength switching.
+        Switch wavelength only twice per batch instead of for every config.
+        """
+        print(f"\nBatched dual-wavelength evaluation of {len(configs)} configurations...")
         
         results = []
         
-        # Evaluate at 1548nm
-        print(f"Setting laser to 1548nm for {self.gate_1548} gate testing...")
-        self.set_wavelength(1548)
-        self.turn_laser_on()
-        time.sleep(14)
-        
-        results_1548 = []
-        for i, config in enumerate(configs):
-            score, details = self.evaluate_single_config_at_wavelength(
-                config, self.truth_table_1548, 1548)
-            results_1548.append((score, details))
-            print(f"  Config {i+1}/1548nm: Score {score:.1f}")
+        # Process configs in batches to minimize wavelength switching
+        for batch_start in range(0, len(configs), batch_size):
+            batch_end = min(batch_start + batch_size, len(configs))
+            batch_configs = configs[batch_start:batch_end]
             
-            # Track best single-wavelength configs
-            if score > self.best_1548_score:
-                self.best_1548_score = score
-                self.best_1548_only = config.copy()
-        
-        self.turn_laser_off()
-        
-        # Evaluate at 1552nm
-        print(f"Setting laser to 1552nm for {self.gate_1552} gate testing...")
-        self.set_wavelength(1552)
-        self.turn_laser_on()
-        time.sleep(14)
-        
-        results_1552 = []
-        for i, config in enumerate(configs):
-            score, details = self.evaluate_single_config_at_wavelength(
-                config, self.truth_table_1552, 1552)
-            results_1552.append((score, details))
-            print(f"  Config {i+1}/1552nm: Score {score:.1f}")
+            print(f"\nProcessing batch {batch_start//batch_size + 1} ({len(batch_configs)} configs)")
             
-            # Track best single-wavelength configs
-            if score > self.best_1552_score:
-                self.best_1552_score = score
-                self.best_1552_only = config.copy()
-        
-        self.turn_laser_off()
-        
-        # Combine results
-        for i, config in enumerate(configs):
-            score_1548, details_1548 = results_1548[i]
-            score_1552, details_1552 = results_1552[i]
+            # Evaluate entire batch at 1548nm first
+            print(f"Setting laser to 1548nm for {self.gate_1548} gate testing...")
+            self.set_wavelength(1548)
+            self.turn_laser_on()
+            time.sleep(14)
             
-            # Improved combined scoring
-            if score_1548 < -500 or score_1552 < -500:
-                # Complete failure
-                combined_score = -2000
-            else:
-                # Normalize negative scores
-                norm_1548 = max(0, score_1548 + 50) / 150
-                norm_1552 = max(0, score_1552 + 50) / 150
+            results_1548 = []
+            for i, config in enumerate(batch_configs):
+                score, details = self.evaluate_single_config_at_wavelength(
+                    config, self.truth_table_1548, 1548)
+                results_1548.append((score, details))
+                print(f"  Batch config {i+1}/1548nm: Score {score:.1f}")
                 
-                # Geometric mean favors balanced performance
-                if norm_1548 > 0 and norm_1552 > 0:
-                    geometric_mean = np.sqrt(norm_1548 * norm_1552)
-                    combined_score = geometric_mean * 200
-                    
-                    # Bonus for good performance on both
-                    if score_1548 > 50 and score_1552 > 50:
-                        combined_score *= 1.2
+                # Track best single-wavelength configs
+                if score > self.best_1548_score:
+                    self.best_1548_score = score
+                    self.best_1548_only = config.copy()
+            
+            self.turn_laser_off()
+            print("  1548nm evaluation complete, switching to 1552nm...")
+            
+            # Now evaluate entire batch at 1552nm
+            print(f"Setting laser to 1552nm for {self.gate_1552} gate testing...")
+            self.set_wavelength(1552)
+            self.turn_laser_on()
+            time.sleep(14)
+            
+            results_1552 = []
+            for i, config in enumerate(batch_configs):
+                score, details = self.evaluate_single_config_at_wavelength(
+                    config, self.truth_table_1552, 1552)
+                results_1552.append((score, details))
+                print(f"  Batch config {i+1}/1552nm: Score {score:.1f}")
+                
+                # Track best single-wavelength configs
+                if score > self.best_1552_score:
+                    self.best_1552_score = score
+                    self.best_1552_only = config.copy()
+            
+            self.turn_laser_off()
+            print("  1552nm evaluation complete.")
+            
+            # Combine results for this batch
+            for i, config in enumerate(batch_configs):
+                score_1548, details_1548 = results_1548[i]
+                score_1552, details_1552 = results_1552[i]
+                
+                # Improved combined scoring with consistency weighting
+                if score_1548 < -500 or score_1552 < -500:
+                    # Complete failure
+                    combined_score = -2000
                 else:
-                    combined_score = max(score_1548, score_1552) * 0.3
-            
-            # Track results
-            self.add_evaluation(config, score_1548, score_1552, combined_score, {
-                '1548nm': details_1548,
-                '1552nm': details_1552
-            })
-            
-            # Update best configuration
-            if combined_score > self.best_score:
-                self.best_score = combined_score
-                self.best_config = config.copy()
-                self.best_details = {
+                    # Normalize negative scores
+                    norm_1548 = max(0, score_1548 + 50) / 150
+                    norm_1552 = max(0, score_1552 + 50) / 150
+                    
+                    # Geometric mean favors balanced performance
+                    if norm_1548 > 0 and norm_1552 > 0:
+                        geometric_mean = np.sqrt(norm_1548 * norm_1552)
+                        combined_score = geometric_mean * 200
+                        
+                        # Bonus for good performance on both
+                        if score_1548 > 50 and score_1552 > 50:
+                            combined_score *= 1.2
+                            
+                        # Additional consistency bonus for combined score
+                        # Check if both wavelengths show good consistency
+                        consistency_1548 = all(d.get('std', 0) < 0.1 for d in details_1548.values())
+                        consistency_1552 = all(d.get('std', 0) < 0.1 for d in details_1552.values())
+                        if consistency_1548 and consistency_1552:
+                            combined_score *= 1.1
+                    else:
+                        combined_score = max(score_1548, score_1552) * 0.3
+                
+                # Track results
+                self.add_evaluation(config, score_1548, score_1552, combined_score, {
                     '1548nm': details_1548,
-                    '1552nm': details_1552,
-                    'scores': {
-                        '1548nm': score_1548, 
-                        '1552nm': score_1552, 
-                        'combined': combined_score
+                    '1552nm': details_1552
+                })
+                
+                # Update best configuration
+                if combined_score > self.best_score:
+                    self.best_score = combined_score
+                    self.best_config = config.copy()
+                    self.best_details = {
+                        '1548nm': details_1548,
+                        '1552nm': details_1552,
+                        'scores': {
+                            '1548nm': score_1548, 
+                            '1552nm': score_1552, 
+                            'combined': combined_score
+                        }
                     }
-                }
-                print(f"  *** NEW BEST: 1548nm={score_1548:.1f}, 1552nm={score_1552:.1f}, Combined={combined_score:.1f} ***")
-            
-            results.append((config, combined_score, {
-                '1548nm': (score_1548, details_1548),
-                '1552nm': (score_1552, details_1552)
-            }))
+                    print(f"  *** NEW BEST: 1548nm={score_1548:.1f}, 1552nm={score_1552:.1f}, Combined={combined_score:.1f} ***")
+                
+                results.append((config, combined_score, {
+                    '1548nm': (score_1548, details_1548),
+                    '1552nm': (score_1552, details_1552)
+                }))
         
         return results
 
@@ -506,7 +538,8 @@ class ImprovedDualWavelengthOptimizer:
                 config[h] = V_MIN + sample[j] * (V_MAX - V_MIN)
             configs.append(config)
         
-        self.evaluate_configs_dual_wavelength(configs)
+        # Use batched evaluation for initial sampling
+        self.evaluate_configs_dual_wavelength_batched(configs, batch_size=15)
         print(f"Initial sampling complete. Best score: {self.best_score:.1f}")
 
     def differential_evolution_phase(self, n_generations=10):
@@ -526,6 +559,7 @@ class ImprovedDualWavelengthOptimizer:
         
         bounds = [(V_MIN, V_MAX)] * len(MODIFIABLE_HEATERS)
         
+        configs_to_evaluate = []
         for gen in range(n_generations):
             result = differential_evolution(
                 objective, 
@@ -538,10 +572,13 @@ class ImprovedDualWavelengthOptimizer:
             )
             
             config = self.array_to_config(result.x)
-            self.evaluate_configs_dual_wavelength([config])
-            
-            if len(self.X_evaluated) >= 10:
-                self.fit_gaussian_processes()
+            configs_to_evaluate.append(config)
+        
+        # Evaluate all DE configs in one go to minimize wavelength switching
+        self.evaluate_configs_dual_wavelength_batched(configs_to_evaluate, batch_size=len(configs_to_evaluate))
+        
+        if len(self.X_evaluated) >= 10:
+            self.fit_gaussian_processes()
 
     def bayesian_optimize(self, n_iterations=50, batch_size=5):
         print(f"\nBayesian optimization: {n_iterations} iterations, batch size {batch_size}")
@@ -553,7 +590,7 @@ class ImprovedDualWavelengthOptimizer:
         while iteration < n_iterations:
             # Adaptive batch size
             if no_improvement_count > 5:
-                current_batch_size = min(batch_size + 2, 10)
+                current_batch_size = min(batch_size + 2, 15)  # Increased max batch size
             else:
                 current_batch_size = batch_size
             
@@ -562,8 +599,8 @@ class ImprovedDualWavelengthOptimizer:
                 min(current_batch_size, n_iterations - iteration))
             iteration += len(batch_configs)
             
-            # Evaluate
-            results = self.evaluate_configs_dual_wavelength(batch_configs)
+            # Evaluate using batched approach
+            results = self.evaluate_configs_dual_wavelength_batched(batch_configs, batch_size=current_batch_size)
             
             # Update GP models
             if len(self.X_evaluated) >= 10:
@@ -579,7 +616,7 @@ class ImprovedDualWavelengthOptimizer:
             # Periodic focused search if stuck
             if no_improvement_count > 10 and self.best_config:
                 print("  Performing focused local search...")
-                self.focused_search_around_best(n_variations=5)
+                self.focused_search_around_best(n_variations=8)  # Reduced to work better with batching
                 no_improvement_count = 0
 
     def focused_search_around_best(self, n_variations=10):
@@ -624,7 +661,8 @@ class ImprovedDualWavelengthOptimizer:
             
             variations.append(variation)
         
-        self.evaluate_configs_dual_wavelength(variations)
+        # Use batched evaluation
+        self.evaluate_configs_dual_wavelength_batched(variations, batch_size=len(variations))
 
     def test_final_configuration(self):
         if not self.best_config:
@@ -646,6 +684,7 @@ class ImprovedDualWavelengthOptimizer:
             
             high_outputs = []
             low_outputs = []
+            all_measurements = []  # Track all individual measurements for consistency analysis
             
             for input_state in INPUT_COMBINATIONS:
                 current_config = self.best_config.copy()
@@ -655,22 +694,23 @@ class ImprovedDualWavelengthOptimizer:
                 self.send_heater_values(current_config)
                 time.sleep(0.3)
                 
-                # Multiple measurements for final test
+                # Multiple measurements for final test with more detail
                 measurements = []
-                for _ in range(5):
+                for _ in range(7):  # More measurements for final test
                     measurements.append(self.measure_output())
                     time.sleep(0.05)
                 
                 output = np.median(measurements)
                 std = np.std(measurements)
                 expected = truth_table[input_state]
+                all_measurements.extend(measurements)
                 
                 if expected:
                     high_outputs.append(output)
                 else:
                     low_outputs.append(output)
                 
-                print(f"  {input_state}: {output:.4f}V ±{std:.4f} ({'HIGH' if expected else 'LOW'})")
+                print(f"  {input_state}: {output:.4f}V ±{std:.4f} ({'HIGH' if expected else 'LOW'}) [range: {min(measurements):.4f}-{max(measurements):.4f}]")
             
             if high_outputs and low_outputs:
                 min_high = min(high_outputs)
@@ -679,17 +719,27 @@ class ImprovedDualWavelengthOptimizer:
                 mean_low = np.mean(low_outputs)
                 separation = min_high - max_low
                 
+                # Enhanced consistency metrics
+                high_std = np.std(high_outputs) if len(high_outputs) > 1 else 0
+                low_std = np.std(low_outputs) if len(low_outputs) > 1 else 0
+                high_range = max(high_outputs) - min(high_outputs) if len(high_outputs) > 1 else 0
+                low_range = max(low_outputs) - min(low_outputs) if len(low_outputs) > 1 else 0
+                
                 if separation > 0:
                     er_db = 10 * np.log10(min_high / max(max_low, 0.001))
                     print(f"\n  Performance Metrics:")
                     print(f"    Extinction Ratio: {er_db:.2f} dB")
                     print(f"    Logic Separation: {separation:.3f}V")
-                    print(f"    Mean High: {mean_high:.3f}V")
-                    print(f"    Mean Low: {mean_low:.3f}V")
+                    print(f"    Mean High: {mean_high:.3f}V (±{high_std:.3f}, range: {high_range:.3f}V)")
+                    print(f"    Mean Low: {mean_low:.3f}V (±{low_std:.3f}, range: {low_range:.3f}V)")
+                    print(f"    High Consistency: {100*(1-high_std/max(mean_high,0.1)):.1f}%")
+                    print(f"    Low Consistency: {100*(1-low_std/max(mean_low,0.1)):.1f}%")
                 else:
                     print(f"\n  WARNING: OVERLAPPING LOGIC LEVELS!")
                     print(f"    Overlap: {abs(separation):.3f}V")
                     print(f"    Mean separation: {mean_high - mean_low:.3f}V")
+                    print(f"    High values: {high_outputs}")
+                    print(f"    Low values: {low_outputs}")
             
             self.turn_laser_off()
 
@@ -776,27 +826,27 @@ class ImprovedDualWavelengthOptimizer:
         
         start_time = time.time()
         
-        # Phase 1: Initial exploration
+        # Phase 1: Initial exploration with larger batches
         self.initial_sampling(n_samples=40)
         
-        # Phase 2: Early Bayesian optimization
-        self.bayesian_optimize(n_iterations=70, batch_size=5)
+        # Phase 2: Early Bayesian optimization with moderate batches
+        self.bayesian_optimize(n_iterations=60, batch_size=8)
         
-        # # Phase 3: Differential evolution for global search
-        # if len(self.X_evaluated) > 20: 
-        #     self.differential_evolution_phase(n_generations=5)
+        # Phase 3: Differential evolution for global search (batched)
+        if len(self.X_evaluated) > 20: 
+            self.differential_evolution_phase(n_generations=8)
         
-        # # Phase 4: Intensive Bayesian optimization
-        self.bayesian_optimize(n_iterations=40, batch_size=8)
+        # Phase 4: Intensive Bayesian optimization with larger batches
+        self.bayesian_optimize(n_iterations=40, batch_size=10)
         
-        # # Phase 5: Final focused refinement
-        # self.focused_search_around_best(n_variations=15)
+        # Phase 5: Final focused refinement
+        self.focused_search_around_best(n_variations=12)
         
-        # Phase 6: Last push with smaller perturbations
+        # Phase 6: Last push with smaller perturbations (batched)
         if self.best_config:
             print("\nFinal refinement phase...")
             final_configs = []
-            for _ in range(10):
+            for _ in range(15):  # Increased for better final search
                 config = self.best_config.copy()
                 # Very small perturbations
                 for h in MODIFIABLE_HEATERS:
@@ -806,7 +856,7 @@ class ImprovedDualWavelengthOptimizer:
                             V_MIN, V_MAX
                         )
                 final_configs.append(config)
-            self.evaluate_configs_dual_wavelength(final_configs)
+            self.evaluate_configs_dual_wavelength_batched(final_configs, batch_size=len(final_configs))
         
         # Final testing
         self.test_final_configuration()
@@ -838,4 +888,4 @@ def main():
         print("\nOPTIMIZATION FAILED")
 
 if __name__ == "__main__":
-    main()       
+    main()
