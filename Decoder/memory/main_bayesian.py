@@ -11,7 +11,7 @@ from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, WhiteKernel, ConstantKernel
 
 # Serial port configuration 
-SERIAL_PORT = 'COM4'
+SERIAL_PORT = 'COM3'
 BAUD_RATE = 115200
 
 # === DECODER CONFIGURATION ===
@@ -655,7 +655,7 @@ class BayesianDecoderOptimizer:
                 elif self.best_score < 90:
                     beta = 4.0    # Fine-tuning
                 else:
-                    beta = 3    # Pure refinement
+                    beta = 2    # Pure refinement
                 
                 # Vectorized acquisition function
                 ucb_scores = mu + beta * sigma
@@ -711,9 +711,9 @@ class BayesianDecoderOptimizer:
         
         # Multiple exploration strategies
         strategies = [
-            {'name': 'coarse', 'range': 0.8, 'fraction': 0.4, 'samples': 5},    # Coarse search
-            {'name': 'medium', 'range': 0.4, 'fraction': 0.3, 'samples': 5},   # Medium search
-            {'name': 'fine', 'range': 0.2, 'fraction': 0.2, 'samples': 5},      # Fine tuning
+            {'name': 'coarse', 'range': 0.4, 'fraction': 0.4, 'samples': 10},    # Coarse search
+            {'name': 'medium', 'range': 0.2, 'fraction': 0.3, 'samples': 15},   # Medium search
+            {'name': 'fine', 'range': 0.1, 'fraction': 0.2, 'samples': 15},      # Fine tuning
         ]
         
         for strategy in strategies:
@@ -868,8 +868,8 @@ class BayesianDecoderOptimizer:
         self.bayesian_optimize(n_iterations=15)
         self.explore_around_best()
 
-        self.bayesian_optimize(n_iterations=15)
-        self.explore_around_best()
+        #self.bayesian_optimize(n_iterations=15)
+        #self.explore_around_best()
 
         self.test_final_configuration()
         
@@ -887,8 +887,9 @@ class BayesianDecoderOptimizer:
 
 def main():
     start_time = time.time()
-    optimizer = BayesianDecoderOptimizer()
     
+    optimizer = BayesianDecoderOptimizer()
+
     try:
         optimizer.optimize()
     except KeyboardInterrupt:

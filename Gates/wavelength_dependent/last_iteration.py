@@ -134,55 +134,74 @@ class ImprovedDualWavelengthOptimizer:
             
         return mu[0] + beta * sigma[0]
 
-    def suggest_next_configs(self, n_configs=5):
-        if len(self.X_evaluated) < 10:
-            return [self.array_to_config(np.random.uniform(V_MIN, V_MAX, len(MODIFIABLE_HEATERS))) for _ in range(n_configs)]
-        
-        configs = []
-        bounds = [(V_MIN, V_MAX)] * len(MODIFIABLE_HEATERS)
-        
-        def obj_func(x, mode):
-            return -self.acquisition_function(x, mode=mode, beta=2.5)
 
-        # Generate candidates using DE on the acquisition function
-        for i in range(n_configs):
-            mode = ['combined', '1548', '1552'][i % 3]
-            result = differential_evolution(lambda x: obj_func(x, mode), bounds, maxiter=50, popsize=15, polish=True)
-            configs.append(self.array_to_config(result.x))
-        return configs
-        
+    def suggest_next_configs(self, n_configs=5, focused_bounds_center=None):
+            if len(self.X_evaluated) < 10 and focused_bounds_center is None:
+                return [self.array_to_config(np.random.uniform(V_MIN, V_MAX, len(MODIFIABLE_HEATERS))) for _ in range(n_configs)]
+            
+            if focused_bounds_center:
+                # Create narrow bounds around the provided center point
+                new_bounds = []
+                radius = 0.5 # Search within +/- 0.5V
+                for heater in MODIFIABLE_HEATERS:
+                    center_val = focused_bounds_center.get(heater, 2.5)
+                    new_bounds.append((max(V_MIN, center_val - radius), min(V_MAX, center_val + radius)))
+                bounds = new_bounds
+            else:
+                # Use the full, wide bounds for a fresh run
+                bounds = [(V_MIN, V_MAX)] * len(MODIFIABLE_HEATERS)
+            
+            configs = []
+            def obj_func(x, mode):
+                return -self.acquisition_function(x, mode=mode, beta=2.5)
+
+            for i in range(n_configs):
+                mode = ['combined', '1548', '1552'][i % 3]
+                result = differential_evolution(lambda x: obj_func(x, mode), bounds, maxiter=50, popsize=15, polish=True)
+                configs.append(self.array_to_config(result.x))
+            return configs
+
     def calculate_extinction_ratio_score(self, high_outputs, low_outputs):
         if not high_outputs or not low_outputs:
-            return -1000.0
+            return -2000.0  # Severe penalty for no outputs
 
         min_high = min(high_outputs)
         max_low = max(low_outputs)
         separation = min_high - max_low
 
-        if separation > 0:
-            # Basic extinction ratio score
-            er_db = 10 * np.log10(min_high / max(max_low, 1e-3))
-            score = 10 * er_db
+        # If logic levels overlap, this is a complete failure. Punish severely.
+        if separation <= 0:
+            return -1000.0 + 100.0 * separation # Penalty proportional to the overlap
 
-            # --- NEW CONSISTENCY PENALTY ---
-            # Calculate the standard deviation of the output groups.
-            # A high std dev means the values are spread out (inconsistent).
-            if len(low_outputs) > 1:
-                low_std_dev = np.std(low_outputs)
-                # Penalize heavily based on the spread of the LOWs.
-                # The '500' is a strong penalty factor we can tune.
-                score -= 500 * low_std_dev
+        # --- Tiered Scoring Logic ---
+        # We now score based on achieving certain performance tiers.
 
-            if len(high_outputs) > 1:
-                high_std_dev = np.std(high_outputs)
-                # Also penalize inconsistency in the HIGHs.
-                score -= 500 * high_std_dev
-            # --------------------------------
+        er_db = 10 * np.log10(min_high / max(max_low, 1e-3))
+        
+        # Tier 1: Is the ER even usable? (e.g., > 3 dB)
+        if er_db < 3.0:
+            # If not, the score is low and is ONLY based on ER. Don't even consider consistency yet.
+            # This forces the optimizer to find a decent ER first.
+            return er_db * 10 - 50 # A score between -20 and -50 for 0-3dB ER
 
-            return max(-1000.0, score)
-        else:
-            # If levels overlap, penalize based on how much they overlap.
-            return -500.0 + 100.0 * separation
+        # Tier 2: The ER is acceptable. NOW we can factor in consistency.
+        # Start with a base score for achieving a good ER
+        score = 50 + (er_db - 3.0) * 15 # e.g., 50 points for 3dB, 80 points for 5dB
+
+        # Add a balanced penalty for inconsistency
+        penalty_factor = 75.0 
+
+        if len(low_outputs) > 1:
+            low_std_dev = np.std(low_outputs)
+            # The penalty is now smaller relative to the base score
+            score -= penalty_factor * low_std_dev
+
+        if len(high_outputs) > 1:
+            high_std_dev = np.std(high_outputs)
+            score -= penalty_factor * high_std_dev
+
+        return score
+
 
     def _calculate_combined_score(self, score_1548, score_1552):
         """Helper to compute combined score, rewarding balance."""
@@ -235,7 +254,7 @@ class ImprovedDualWavelengthOptimizer:
             current_config[INPUT_HEATERS[1]] = input_state[1]
             
             self.send_heater_values(current_config)
-            time.sleep(0.18) # Slightly reduced delay
+            time.sleep(0.2)
             
             measurements = [self.measure_output() for _ in range(3)] # Reduced measurements for speed
             output = np.median(measurements)
@@ -417,55 +436,100 @@ class ImprovedDualWavelengthOptimizer:
             print("--- Final Configuration (copy from here) ---")
             print(json.dumps(final_config, indent=4))
 
-    def optimize(self):
-        print("\n" + "="*60 + "\nIMPROVED DUAL-WAVELENGTH OPTIMIZATION\n" + "="*60)
-        start_time = time.time()
-        
-        # --- Phase 1: Initial Exploration ---
-        self.run_multi_phase_evaluation({
-            "Initial LHS Sampling": lambda: [
-                self.array_to_config(V_MIN + qmc.LatinHypercube(d=len(MODIFIABLE_HEATERS)).random(n=1)[0] * (V_MAX - V_MIN))
-                for _ in range(40)
-            ]
-        })
-        
-        # --- Phase 2: Iterative Bayesian Optimization ---
-        # This phase must be iterative, so it runs in a loop.
-        print("\n" + "="*60 + "\nStarting Bayesian Optimization Phase\n" + "="*60)
-        for i in range(10): # 10 iterations of Bayesian optimization
-            print(f"\nBayesian Iteration {i+1}/10")
-            self.run_multi_phase_evaluation({
-                f"Bayesian Batch {i+1}": lambda: self.suggest_next_configs(n_configs=8)
-            })
+    def optimize(self, focused_run=False, prev_best_config=None):
+            """
+            Main optimization loop.
+            - If focused_run is True, it will skip initial sampling and use the 
+            prev_best_config to seed the search.
+            """
+            run_type = "FOCUSED RUN" if focused_run else "FRESH RUN"
+            print("\n" + "="*60 + f"\nIMPROVED DUAL-WAVELENGTH OPTIMIZATION ({run_type})\n" + "="*60)
+            start_time = time.time()
 
-        # --- Phase 3: Focused Refinement ---
-        print("\n" + "="*60 + "\nStarting Refinement Phase\n" + "="*60)
-        self.run_multi_phase_evaluation({
-            "Focused Search": lambda: [
-                self.array_to_config(np.clip(self.config_to_array(self.best_config) + np.random.normal(0, 0.2, len(MODIFIABLE_HEATERS)), V_MIN, V_MAX))
-                for _ in range(15)
-            ],
-            "Final Perturbations": lambda: [
-                 self.array_to_config(np.clip(self.config_to_array(self.best_config) + np.random.normal(0, 0.05, len(MODIFIABLE_HEATERS)), V_MIN, V_MAX))
-                for _ in range(15)
-            ]
-        })
+            if focused_run:
+                if prev_best_config is None:
+                    print("ERROR: A focused run requires a prev_best_config dictionary.")
+                    return None, None # Exit safely
+                # --- WARM START FOR FOCUSED RUN ---
+                print("\n" + "="*60 + "\nWARM START: Seeding optimizer with known best configuration.\n" + "="*60)
+                self.run_multi_phase_evaluation({
+                    "Warm Start Seed": lambda: [prev_best_config]
+                })
+            else:
+                # --- PHASE 1: INITIAL EXPLORATION (for a fresh run) ---
+                self.run_multi_phase_evaluation({
+                    "Initial LHS Sampling": lambda: [
+                        self.array_to_config(V_MIN + qmc.LatinHypercube(d=len(MODIFIABLE_HEATERS)).random(n=1)[0] * (V_MAX - V_MIN))
+                        for _ in range(40)
+                    ]
+                })
 
-        self.test_final_configuration()
-        elapsed_time = (time.time() - start_time) / 60
-        
-        print(f"\n" + "="*60 + f"\nOPTIMIZATION COMPLETE in {elapsed_time:.1f} minutes\n" + "="*60)
-        print(f"Total evaluations: {len(self.evaluation_history)}")
-        print(f"Best combined score: {self.best_score:.2f}")
-        self.save_results()
-        self.cleanup()
-        return self.best_config, self.best_score
+            # --- PHASE 2: ITERATIVE BAYESIAN OPTIMIZATION ---
+            print("\n" + "="*60 + "\nStarting Bayesian Optimization Phase\n" + "="*60)
+            stagnation_counter = 0
+            last_best_score = self.best_score
+            for i in range(15): # Increased iterations
+                print(f"\nBayesian Iteration {i+1}/15")
+                if self.best_score > last_best_score:
+                    print("  -> Score has improved. Resetting stagnation counter.")
+                    stagnation_counter = 0
+                    last_best_score = self.best_score
+                else:
+                    stagnation_counter += 1
+                    print(f"  -> Score has not improved. Stagnation counter: {stagnation_counter}")
+
+                if stagnation_counter >= 14: # If stuck for 4 iterations...
+                    print("  -> STAGNATION DETECTED! Forcing a wide, random search to find new areas.")
+                    self.run_multi_phase_evaluation({
+                        f"Stagnation Breaker {i+1}": lambda: [self.array_to_config(np.random.uniform(V_MIN, V_MAX, len(MODIFIABLE_HEATERS))) for _ in range(5)]
+                    })
+                    stagnation_counter = 0 # Reset counter after the shake-up
+                else:
+                    self.run_multi_phase_evaluation({
+                        f"Bayesian Batch {i+1}": lambda: self.suggest_next_configs(n_configs=8, focused_bounds_center=prev_best_config if focused_run else None)
+                    })
+
+            # --- PHASE 3: FINAL REFINEMENT ---
+            if self.best_config:
+                print("\n" + "="*60 + "\nStarting Final Refinement Phase\n" + "="*60)
+                self.run_multi_phase_evaluation({
+                    "Final Perturbations": lambda: [ self.array_to_config(np.clip(self.config_to_array(self.best_config) + np.random.normal(0, 0.1, len(MODIFIABLE_HEATERS)), V_MIN, V_MAX)) for _ in range(20) ]
+                })
+
+            # --- FINAL STEPS ---
+            self.test_final_configuration()
+            elapsed_time = (time.time() - start_time) / 60
+            
+            print(f"\n" + "="*60 + f"\nOPTIMIZATION COMPLETE in {elapsed_time:.1f} minutes\n" + "="*60)
+            print(f"Total evaluations: {len(self.evaluation_history)}")
+            print(f"Best combined score: {self.best_score:.2f}")
+            self.save_results()
+            self.cleanup()
+            
+            # This return statement is now correctly placed at the end of the function's scope
+            return self.best_config, self.best_score
 
 def main():
     optimizer = ImprovedDualWavelengthOptimizer(GATE_1548, GATE_1552)
-    best_config, best_score = optimizer.optimize()
 
-    # --- NEW: Explicitly print the final results to the console ---
+    # --- CHOOSE YOUR RUN TYPE ---
+    # To run a fresh optimization from scratch:
+    # best_config, best_score = optimizer.optimize(focused_run=False)
+
+    # To run a focused run based on a previous best result:
+# This dictionary goes inside the main() function
+    prev_best_config = {
+        0: 1.026,   1: 0.144,   2: 0.886,   3: 1.008,   4: 1.748,
+        5: 0.369,   6: 0.488,   7: 4.343,   8: 1.665,   9: 0.852,
+        10: 4.412,  11: 4.9,    12: 3.827,  13: 2.578,  14: 1.424,
+        15: 1.181,  16: 1.756,  17: 1.307,  18: 3.349,  19: 1.891,
+        20: 1.247,  21: 1.641,  22: 0.99,   23: 0.574,  24: 2.944,
+        25: 0.117,  26: 2.767,  27: 3.091,  28: 1.281,  29: 2.654,
+        30: 4.889,  31: 1.292,  32: 0.421
+    }
+    best_config, best_score = optimizer.optimize(focused_run=True, prev_best_config=prev_best_config)
+    # --------------------------
+
     print("\n" + "="*60)
     print("                FINAL OPTIMIZATION RESULT")
     print("="*60)
@@ -473,7 +537,6 @@ def main():
         final_config_dict = optimizer.format_config()
         print(f"Best Combined Score: {best_score:.2f}")
         print("\nFinal Heater Configuration:")
-        # Pretty print the dictionary
         print(json.dumps(final_config_dict, indent=4))
     else:
         print("\nOPTIMIZATION FAILED TO FIND A SUITABLE CONFIGURATION.")
