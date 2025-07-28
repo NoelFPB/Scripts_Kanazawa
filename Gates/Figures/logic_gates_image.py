@@ -21,13 +21,13 @@ axes = axes.flatten()
 # Plot
 for i, gate in enumerate(unique_gates):
     gate_df = df[df['Gate'] == gate]
-    axes[i].bar(gate_df['Label'], gate_df['Output'], color='skyblue')
-    axes[i].set_title(f"{gate} Gate", fontsize=12)
+    axes[i].bar(gate_df['Label'], gate_df['Output'], color='steelblue')
+    axes[i].set_title(f"{gate} Gate", fontsize=14)
     axes[i].set_ylim(0, 1.1)
-    axes[i].set_ylabel("Normalized Output", fontsize=10)
-    axes[i].set_xlabel("Input (V)", fontsize=10)
-    axes[i].tick_params(axis='x', labelsize=8)
-    axes[i].tick_params(axis='y', labelsize=8)
+    axes[i].set_ylabel("Normalized Output", fontsize=11)
+    axes[i].set_xlabel("Input (V)", fontsize=11)
+    axes[i].tick_params(axis='x', labelsize=9.5)
+    axes[i].tick_params(axis='y', labelsize=9.5)
     # Add threshold line
     axes[i].axhline(y=0.5, color='red', linestyle='--', linewidth=1)
 
