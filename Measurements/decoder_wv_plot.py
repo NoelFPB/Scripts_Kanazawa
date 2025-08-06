@@ -262,37 +262,6 @@ def plot_decoder_analysis_innovative():
                                 color=text_color, fontsize=8)
 
 
-    # --- 2. Per-Channel Extinction Ratio Heatmap (Second Row, Spans Both Columns) ---
-    ax_channel_heatmap = fig.add_subplot(gs[1, :]) # Second row, spans both columns
-    
-    channel_er_data_for_heatmap = pd.DataFrame(index=wavelengths)
-    for channel_num, result in channel_results.items():
-        channel_er_data_for_heatmap[f"Ch{channel_num} ({result['label']})"] = pd.Series(result['extinction_ratios'])
-
-    im_channel = ax_channel_heatmap.imshow(channel_er_data_for_heatmap.T, cmap=cmap_er, aspect='auto', 
-                                  interpolation='nearest', vmin=vmin_er, vmax=vmax_er)
-    
-    ax_channel_heatmap.set_yticks(np.arange(len(channel_er_data_for_heatmap.columns)))
-    ax_channel_heatmap.set_yticklabels(channel_er_data_for_heatmap.columns, fontsize=11)
-    
-    ax_channel_heatmap.set_xticks(np.arange(len(channel_er_data_for_heatmap.index)))
-    ax_channel_heatmap.set_xticklabels([f'{int(wl)}' for wl in channel_er_data_for_heatmap.index], rotation=45, ha='right', fontsize=9)
-    
-    ax_channel_heatmap.set_xlabel('Wavelength (nm)', fontsize=12)
-    ax_channel_heatmap.set_title('Channel-Specific Extinction Ratio (dB) Heatmap', fontsize=14)
-    
-    cbar_channel = fig.colorbar(im_channel, ax=ax_channel_heatmap, orientation='vertical', pad=0.02)
-    cbar_channel.set_label('Extinction Ratio (dB)', fontsize=10)
-    
-    for i in range(len(channel_er_data_for_heatmap.columns)):
-        for j in range(len(channel_er_data_for_heatmap.index)):
-            er_val = channel_er_data_for_heatmap.iloc[j, i]
-            if not np.isnan(er_val):
-                normalized_val = (er_val - vmin_er) / (vmax_er - vmin_er)
-                text_color = 'black' if (normalized_val > 0.4 and normalized_val < 0.8) or np.isclose(normalized_val, norm_0db_pos, atol=0.05) else 'white'
-                ax_channel_heatmap.text(j, i, f'{er_val:.1f}', ha='center', va='center', 
-                                color=text_color, fontsize=8)
-
 
     # --- 3. Input-Specific Voltage Separation Plots (Bottom 2 Rows) ---
     # Now, these plots will show voltage levels for EACH INPUT (not each channel)
