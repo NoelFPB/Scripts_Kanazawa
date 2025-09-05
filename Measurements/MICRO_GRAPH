@@ -1,0 +1,146 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+from io import StringIO
+
+def load_data_from_string(data_string):
+    """Load data from the string format"""
+    return pd.read_csv(StringIO(data_string), sep=' ')
+
+def load_data_from_file(filename):
+    """Alternative: Load data from CSV file"""
+    return pd.read_csv(filename)
+
+def convert_to_microseconds(df):
+    """Convert timestamp from seconds to microseconds"""
+    # Convert scientific notation to float, then to microseconds
+    df['timestamp_seconds'] = df['timestamp'].astype(float)
+    df['timestamp_us'] = df['timestamp_seconds'] * 1e6  # Convert to microseconds
+    return df
+
+def identify_states(df):
+    """Identify the logic states based on A and B values"""
+    states = []
+    for _, row in df.iterrows():
+        if row['A'] < 1 and row['B'] < 1:
+            states.append('00')
+        elif row['A'] < 1 and row['B'] > 4:
+            states.append('01')
+        elif row['A'] > 4 and row['B'] < 1:
+            states.append('10')
+        elif row['A'] > 4 and row['B'] > 4:
+            states.append('11')
+        else:
+            states.append('??')  # Transition or unknown state
+    
+    df['state'] = states
+    return df
+
+def create_output_plot(df, save_plots=True):
+    """Create output signal plot only with microsecond time axis"""
+    
+    # Set up the figure with single subplot
+    fig, ax = plt.subplots(1, 1, figsize=(12, 6))
+    
+    # Sort dataframe by timestamp to ensure continuous lines
+    df_sorted = df.sort_values('timestamp_us').reset_index(drop=True)
+    
+    # Graph: Output vs Time - Simple continuous line
+    ax.plot(df_sorted['timestamp_us'], df_sorted['OUT'], linewidth=2, color='red', alpha=0.8)
+    ax.set_ylabel('Output (V)', fontsize=12)
+    ax.set_xlabel('Time (μs)', fontsize=12)  # Using microsecond symbol
+    ax.grid(True, alpha=0.3)
+    ax.set_title('Output Signal vs Time')
+    
+    # Add vertical lines to show state transitions
+    state_changes = []
+    prev_state = df_sorted['state'].iloc[0]
+    for i, row in df_sorted.iterrows():
+        if row['state'] != prev_state:
+            state_changes.append(row['timestamp_us'])
+            prev_state = row['state']
+    
+    for change_time in state_changes:
+        ax.axvline(x=change_time, color='black', linestyle='--', alpha=0.5, linewidth=1)
+    
+    # Format x-axis to show microseconds nicely with 20μs divisions
+    time_min = df_sorted['timestamp_us'].min()
+    time_max = df_sorted['timestamp_us'].max()
+    
+    # Create tick locations at 20μs intervals
+    # Round the min/max to nice boundaries
+    tick_start = np.floor(time_min / 20) * 20
+    tick_end = np.ceil(time_max / 20) * 20
+    major_ticks = np.arange(tick_start, tick_end + 20, 20)
+    
+    # Optional: Add minor ticks every 5μs for finer resolution
+    minor_ticks = np.arange(tick_start, tick_end + 5, 5)
+    
+    ax.ticklabel_format(style='plain', axis='x')  # Disable scientific notation on x-axis
+    
+    # Set the ticks
+    ax.set_xticks(major_ticks)
+    ax.set_xticks(minor_ticks, minor=True)
+    
+    # Improve grid appearance
+    ax.grid(True, which='major', alpha=0.3, linewidth=1)
+    ax.grid(True, which='minor', alpha=0.1, linewidth=0.5)
+    
+    # Adjust layout to prevent overlap
+    plt.tight_layout()
+    
+    # Save the plots if requested
+    if save_plots:
+        timestamp = pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')
+        filename = f'output_signal_microseconds_{timestamp}.png'
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        print(f"Plot saved as: {filename}")
+    
+    return fig
+
+def print_summary(df):
+    """Print a summary of the data"""
+    print("=== DATA SUMMARY ===")
+    print(f"Total data points: {len(df)}")
+    print(f"Time range: {df['timestamp_us'].min():.2f}μs to {df['timestamp_us'].max():.2f}μs")
+    print(f"Duration: {df['timestamp_us'].max() - df['timestamp_us'].min():.2f} microseconds")
+    
+    # Also show the original seconds for reference
+    print(f"Original time range: {df['timestamp_seconds'].min():.6f}s to {df['timestamp_seconds'].max():.6f}s")
+    print(f"Original duration: {df['timestamp_seconds'].max() - df['timestamp_seconds'].min():.6f} seconds")
+    
+    print(f"\nInput A range: {df['A'].min():.3f}V to {df['A'].max():.3f}V")
+    print(f"Input B range: {df['B'].min():.3f}V to {df['B'].max():.3f}V")
+    print(f"Output range: {df['OUT'].min():.3f}V to {df['OUT'].max():.3f}V")
+    
+    print(f"\nState distribution:")
+    state_counts = df['state'].value_counts().sort_index()
+    for state, count in state_counts.items():
+        percentage = (count / len(df)) * 100
+        print(f"  State {state}: {count} points ({percentage:.1f}%)")
+
+def main():
+    """Main function to run the analysis"""
+    # Load data from file
+    df = load_data_from_file('micro.csv')
+    
+    # Convert timestamps to microseconds
+    df = convert_to_microseconds(df)
+    
+    # Identify states
+    df = identify_states(df)
+    
+    # Print summary
+    print_summary(df)
+    
+    # Create single output plot with microsecond time axis
+    print("\nCreating output signal plot with microsecond time axis...")
+    fig = create_output_plot(df, save_plots=True)
+    
+    # Show the plots
+    plt.show()
+    
+    return df, fig
+
+if __name__ == "__main__":
+    df, fig = main()

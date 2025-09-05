@@ -3,6 +3,9 @@ import time
 import pyvisa
 import numpy as np
 import random
+import json
+import os
+from datetime import datetime
 from scipy.stats import qmc
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, WhiteKernel, ConstantKernel
@@ -83,6 +86,87 @@ class BayesianLogicGateOptimizer:
             if h not in INPUT_HEATERS:
                 self.base_config[h] = 0.01
 
+        # Initialize saving system
+        self.start_time = time.time()
+        self.iteration_count = 0
+        self.save_directory = self._create_save_directory()
+        self.detailed_results = []  # Store all evaluation details
+
+    def _create_save_directory(self):
+        """Create directory for saving results"""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        dir_name = f"optimization_results_{self.gate_type}_{timestamp}"
+        
+        if not os.path.exists(dir_name):
+            os.makedirs(dir_name)
+            print(f"Created save directory: {dir_name}")
+        
+        return dir_name
+
+    def save_progress(self, iteration_type="optimization"):
+        """Save current optimization progress to files"""
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        elapsed_time = time.time() - self.start_time
+        
+        # Prepare data to save
+        save_data = {
+            "metadata": {
+                "gate_type": self.gate_type,
+                "timestamp": timestamp,
+                "elapsed_time_seconds": elapsed_time,
+                "elapsed_time_minutes": elapsed_time / 60,
+                "iteration_count": self.iteration_count,
+                "iteration_type": iteration_type,
+                "total_evaluations": len(self.y_evaluated)
+            },
+            "optimization_progress": {
+                "best_score": float(self.best_score),
+                "best_config": self.best_config,
+                "formatted_config": self.format_config(),
+                "scores_history": [float(score) for score in self.y_evaluated],
+                "score_statistics": {
+                    "min": float(min(self.y_evaluated)) if self.y_evaluated else None,
+                    "max": float(max(self.y_evaluated)) if self.y_evaluated else None,
+                    "mean": float(np.mean(self.y_evaluated)) if self.y_evaluated else None,
+                    "std": float(np.std(self.y_evaluated)) if self.y_evaluated else None
+                }
+            },
+            "detailed_results": self.detailed_results,
+            "hardware_config": {
+                "input_heaters": INPUT_HEATERS,
+                "modifiable_heaters": MODIFIABLE_HEATERS,
+                "fixed_first_layer": FIXED_FIRST_LAYER,
+                "voltage_range": {"min": V_MIN, "max": V_MAX}
+            }
+        }
+        
+        # Save main results file
+        filename = f"optimization_progress_iter_{self.iteration_count:03d}.json"
+        filepath = os.path.join(self.save_directory, filename)
+        
+        with open(filepath, 'w') as f:
+            json.dump(save_data, f, indent=2)
+        
+        # Also save a "latest" file for easy access
+        latest_filepath = os.path.join(self.save_directory, "latest_results.json")
+        with open(latest_filepath, 'w') as f:
+            json.dump(save_data, f, indent=2)
+        
+        # Save configuration in a simple format for hardware use
+        if self.best_config:
+            config_filepath = os.path.join(self.save_directory, f"best_config_iter_{self.iteration_count:03d}.txt")
+            with open(config_filepath, 'w') as f:
+                f.write(f"# Best configuration for {self.gate_type} gate - Iteration {self.iteration_count}\n")
+                f.write(f"# Score: {self.best_score:.2f}\n")
+                f.write(f"# Timestamp: {timestamp}\n\n")
+                
+                complete_config = self.format_config()
+                for heater, value in complete_config.items():
+                    f.write(f"{heater},{value}\n")
+        
+        print(f"📁 Progress saved to {filepath}")
+        print(f"   Best score: {self.best_score:.2f}, Total evaluations: {len(self.y_evaluated)}")
+
     def _init_scope(self):
         """Initialize oscilloscope for logic gate output measurement"""
         rm = pyvisa.ResourceManager()
@@ -105,7 +189,7 @@ class BayesianLogicGateOptimizer:
 
     def array_to_config(self, x):
         """Convert numpy array to config dict"""
-        return {h: x[i] for i, h in enumerate(MODIFIABLE_cHEATERS)}
+        return {h: x[i] for i, h in enumerate(MODIFIABLE_HEATERS)}
 
     def send_heater_values(self, config):
         """Send heater voltage configuration to hardware"""
@@ -223,6 +307,28 @@ class BayesianLogicGateOptimizer:
         # Cap at 100 points
         final_score = min(100, max(-50, total_score))
         
+        # Store detailed results for saving
+        self.detailed_results.append({
+            "evaluation_number": len(self.detailed_results) + 1,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "config": config.copy(),
+            "score": float(final_score),
+            "output_details": output_details,
+            "metrics": {
+                "extinction_ratio_db": float(er_db),
+                "extinction_ratio_linear": float(er_linear),
+                "logic_separation": float(logic_separation),
+                "min_high": float(min_high),
+                "max_low": float(max_low),
+                "mean_high": float(mean_high),
+                "high_std": float(high_std),
+                "low_std": float(low_std),
+                "er_score": float(er_score),
+                "strength_score": float(strength_score),
+                "consistency_score": float(consistency_score)
+            }
+        })
+        
         # Debug output for improvements
         if final_score > self.best_score:
             print(f"  Logic Gate Extinction Ratio: {er_db:.2f}dB (linear: {er_linear:.1f})")
@@ -256,15 +362,7 @@ class BayesianLogicGateOptimizer:
         
         print(f"    Fitting GP with {len(X)} points, score range: [{y.min():.1f}, {y.max():.1f}]")
         
-        # Robust kernel for photonic device optimization
-        # kernel = (
-        #     ConstantKernel(1.0, constant_value_bounds=(0.1, 100)) *
-        #     RBF(length_scale=1.0, length_scale_bounds=(0.1, 10.0)) +
-        #     WhiteKernel(noise_level=0.5, noise_level_bounds=(0.01, 10.0))
-        # )
-        
         # Try a more flexible kernel:
-
         kernel = (
             ConstantKernel(1.0, constant_value_bounds=(0.1, 100.0)) * 
             Matern(length_scale=1.0, length_scale_bounds=(0.1, 10.0), nu=1.5) +
@@ -334,6 +432,11 @@ class BayesianLogicGateOptimizer:
                 print(f"Config {i+1}/{n_samples}: Score = {score:.2f} ✓")
             else:
                 print(f"Config {i+1}/{n_samples}: Score = {score:.2f}")
+                
+            # Check if we should save progress
+            if (i + 1) % 5 == 0:
+                self.iteration_count += 1
+                self.save_progress("initial_sampling")
         
         print(f"Initial sampling complete. Working configs: {working_configs}/{len(self.y_evaluated)}")
         if working_configs == 0:
@@ -436,6 +539,11 @@ class BayesianLogicGateOptimizer:
                 print(f"  Efficiency: Predicted best={predicted_best:.1f}, Actual best={actual_best:.1f}")
             elif self.gp is not None:
                 print(f"  GP ready for next cycle. Current best: {self.best_score:.1f}")
+            
+            # Save progress every 5 iterations
+            if (iteration + 1) % 5 == 0:
+                self.iteration_count += 1
+                self.save_progress("bayesian_optimization")
         
         print(f"\nBayesian optimization complete!")
         print(f"Total hardware evaluations: {total_evaluations}")
@@ -469,6 +577,11 @@ class BayesianLogicGateOptimizer:
             self.add_evaluation(new_config, score)
             
             print(f"Local exploration {i+1}/{n_samples}: Score = {score:.2f}")
+            
+            # Save progress every 5 iterations
+            if (i + 1) % 5 == 0:
+                self.iteration_count += 1
+                self.save_progress("local_exploration")
 
     def test_final_configuration(self):
         """Test and display final configuration with logic-relevant extinction ratio"""
@@ -577,26 +690,41 @@ class BayesianLogicGateOptimizer:
 
         try:
             # Phase 1: Initial sampling
+            print("\n=== PHASE 1: Initial Sampling ===")
             self.initial_sampling(n_samples=20)
+            self.save_progress("phase_1_complete")
             
             # Phase 2: Bayesian optimization
+            print("\n=== PHASE 2: Bayesian Optimization ===")
             self.bayesian_optimize(n_iterations=20)
+            self.save_progress("phase_2_complete")
             
-            # # Phase 3: Local exploration around best
+            # Phase 3: Local exploration around best
+            print("\n=== PHASE 3: Local Exploration ===")
             self.explore_around_best(n_samples=15)
+            self.save_progress("phase_3_complete")
             
-            # # Phase 4: Final Bayesian refinement
+            # Phase 4: Final Bayesian refinement
+            print("\n=== PHASE 4: Final Bayesian Refinement ===")
             self.bayesian_optimize(n_iterations=20)
+            self.save_progress("phase_4_complete")
             
+            # Phase 5: Final local exploration
+            print("\n=== PHASE 5: Final Local Exploration ===")
             self.explore_around_best(n_samples=8)
-            
+            self.save_progress("phase_5_complete")
             
             # Test final configuration
+            print("\n=== FINAL TESTING ===")
             self.test_final_configuration()
+            
+            # Save final results
+            self.save_progress("optimization_complete")
             
             print(f"\nOptimization complete!")
             print(f"Best score: {self.best_score:.2f}")
             print(f"Total evaluations: {len(self.y_evaluated)}")
+            print(f"Results saved in directory: {self.save_directory}")
             print("\nFinal heater configuration:")
             print(self.format_config())
             
@@ -604,6 +732,8 @@ class BayesianLogicGateOptimizer:
             
         except Exception as e:
             print(f"Optimization failed: {e}")
+            # Save progress even if optimization fails
+            self.save_progress("optimization_failed")
             return None, -1
         
         finally:
@@ -617,8 +747,12 @@ def main():
         optimizer.optimize()
     except KeyboardInterrupt:
         print("\nOptimization interrupted by user")
+        # Save progress on interruption
+        optimizer.save_progress("interrupted_by_user")
     except Exception as e:
         print(f"Error: {e}")
+        # Save progress on error
+        optimizer.save_progress("error_occurred")
     finally:
         try:
             optimizer.cleanup()

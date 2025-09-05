@@ -22,11 +22,11 @@ HEATER_COMBINATIONS = {
 
 # Sequence configuration
 SEQUENCE_STATES = ['00', '01', '10', '11']  # Order of states to cycle through
-STATE_DURATION = 0.5  # Duration to hold each state (seconds)
-INTER_STATE_DELAY = 0.5  # Brief delay between state changes (seconds)
+STATE_DURATION = 0.000001  # Duration to hold each state (seconds)
+INTER_STATE_DELAY = 0.000001  # Brief delay between state changes (seconds)
 
 # Data logging configuration
-SAMPLE_RATE = 20  # Samples per second
+SAMPLE_RATE = 10  # Samples per second
 SAMPLES_PER_STATE = int(STATE_DURATION * SAMPLE_RATE)  # Number of samples per state
 LOG_FILENAME = f"scope_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
 
@@ -82,7 +82,7 @@ def send_heater_values(ser, heater_values):
     ser.flush()
     ser.reset_input_buffer()
     ser.reset_output_buffer()
-    time.sleep(0.01)
+    time.sleep(0.00000001)
 
 def setup_csv_file(filename):
     """Initialize CSV file with headers"""
@@ -155,53 +155,53 @@ def main():
             current_state = SEQUENCE_STATES[state_index]
             heater_values[38], heater_values[37] = HEATER_COMBINATIONS[current_state]
             
-            print(heater_values)
-            print("")
-            # Send heater values
+            # print(heater_values)
+            # print("")
+            # # Send heater values
             send_heater_values(ser, heater_values)
             
             # Display current state
             if state_index == 0:
                 cycle_count += 1
-                print(f"Cycle {cycle_count}:")
+            #    print(f"Cycle {cycle_count}:")
             
-            print(f"  State {current_state}: Input A={heater_values[38]:.1f}V, Input B={heater_values[37]:.1f}V", end="")
+            #print(f"  State {current_state}: Input A={heater_values[38]:.1f}V, Input B={heater_values[37]:.1f}V", end="")
             
             # Sample data during this state
             state_start_time = time.time()
             sample_interval = 1.0 / SAMPLE_RATE  # Time between samples
             
-            for sample_num in range(SAMPLES_PER_STATE):
-                sample_time = state_start_time + (sample_num * sample_interval)
+            # for sample_num in range(SAMPLES_PER_STATE):
+            #     sample_time = state_start_time + (sample_num * sample_interval)
                 
-                # Wait until it's time for the next sample
-                while time.time() < sample_time:
-                    time.sleep(0.001)  # Small sleep to prevent busy waiting
+            #     # Wait until it's time for the next sample
+            #     while time.time() < sample_time:
+            #         time.sleep(0.001)  # Small sleep to prevent busy waiting
                 
-                # Take measurement
-                measurements = measure_single_point(scope)
+            #     # Take measurement
+            #     measurements = measure_single_point(scope)
                 
-                # Log the data
-                timestamp = time.time() - start_time  # Relative timestamp
-                log_data_point(
-                    LOG_FILENAME, fieldnames, timestamp, cycle_count, 
-                    current_state, heater_values[38], heater_values[37], 
-                    sample_num + 1, measurements
-                )
+            #     # Log the data
+            #     timestamp = time.time() - start_time  # Relative timestamp
+            #     log_data_point(
+            #         LOG_FILENAME, fieldnames, timestamp, cycle_count, 
+            #         current_state, heater_values[38], heater_values[37], 
+            #         sample_num + 1, measurements
+            #     )
             
-            # Show sample of the measured values
-            if any(measurements.values()):
-                print(" | Outputs:", end="")
-                for ch_name, value in measurements.items():
-                    if value is not None:
-                        print(f" {ch_name}:{value:.3f}V", end="")
-            print()
+            # # Show sample of the measured values
+            # if any(measurements.values()):
+            #     print(" | Outputs:", end="")
+            #     for ch_name, value in measurements.items():
+            #         if value is not None:
+            #             print(f" {ch_name}:{value:.3f}V", end="")
+            # print()
             
-            # Brief delay between states
-            if INTER_STATE_DELAY > 0:
-                time.sleep(INTER_STATE_DELAY)
+            # # Brief delay between states
+            # if INTER_STATE_DELAY > 0:
+            #     time.sleep(INTER_STATE_DELAY)
             
-            # Move to next state
+            # # Move to next state
             state_index = (state_index + 1) % len(SEQUENCE_STATES)
                 
     except KeyboardInterrupt:
