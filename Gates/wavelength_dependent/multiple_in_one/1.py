@@ -38,7 +38,7 @@ GATE_CONFIGURATIONS = [
         "output_channel": 3
     },
     {
-        "name": "NOR_GATE_1",
+        "name": "NAND_GATE_1",
         "type": "NOR",
         "input_heaters": [38, 39],
         "output_channel": 4

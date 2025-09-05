@@ -8,7 +8,7 @@ from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, WhiteKernel, ConstantKernel
 
 # Serial port configuration 
-SERIAL_PORT = 'COM4'
+SERIAL_PORT = 'COM3'
 BAUD_RATE = 115200
 
 # === DECODER CONFIGURATION ===

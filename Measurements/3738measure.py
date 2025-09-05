@@ -116,10 +116,12 @@ def display_all_heaters(heater_values):
 
 def main():
     try:
-            #initial_config = {0: 4.02, 1: 3.54, 2: 4.15, 3: 3.05, 4: 2.43, 5: 1.36, 6: 3.56, 7: 4.16, 8: 2.11, 9: 0.75, 10: 2.07, 11: 4.38, 12: 3.09, 13: 2.71, 14: 3.97, 15: 0.89, 16: 2.39, 17: 1.43, 18: 1.93, 19: 0.5, 20: 4.36, 21: 1.86, 22: 3.59, 23: 4.69, 24: 3.47, 25: 4.05, 26: 0.38, 27: 4.23, 28: 4.9, 29: 4.36, 30: 4.07, 31: 4.61, 32: 3.46, 33: 0.01, 34: 0.01, 35: 0.01, 36: 0.0, 37: 0.0, 38: 0.01, 39: 0.01}
-
+           
 
             initial_config ={0: 0.1, 1: 0.424, 2: 1.729, 3: 0.1, 4: 2.272, 5: 0.634, 6: 2.414, 7: 0.447, 8: 0.1, 9: 3.76, 10: 0.1, 11: 0.1, 12: 3.033, 13: 0.718, 14: 0.448, 15: 0.431, 16: 0.418, 17: 1.545, 18: 0.198, 19: 2.9, 20: 0.446, 21: 0.723, 22: 0.168, 23: 0.1, 24: 4.841, 25: 0.919, 26: 4.9, 27: 0.1, 28: 1.291, 29: 1.366, 30: 0.862, 31: 1.506, 32: 0.1, 33: 0.01, 34: 0.01, 35: 0.01, 36: 0.01, 37: 0.0, 38: 0.0, 39: 0.01}
+            
+
+            
             
             heater_values = {int(k): float(v) for k, v in initial_config.items()}
             scope, ser = init_hardware()
@@ -128,14 +130,14 @@ def main():
             print_help()
             display_all_heaters(heater_values)
             
-            prev_value_36 = heater_values[36]
+            prev_value_38 = heater_values[38]
             prev_value_37 = heater_values[37]
             
             while True:
                 value_changed = False
                 for key in ['1', '2', '3', '4']:
                     if keyboard.is_pressed(key):
-                        heater_values[36], heater_values[37] = HEATER_COMBINATIONS[key]
+                        heater_values[38], heater_values[37] = HEATER_COMBINATIONS[key]
                         value_changed = True
                         time.sleep(0.2)
                         break
@@ -157,7 +159,7 @@ def main():
                     
                     # Log the change
                     print(f"\nChanged inputs:")
-                    print(f"Input A (H36): {prev_value_36:.2f}V -> {heater_values[36]:.2f}V")
+                    print(f"Input A (H36): {prev_value_38:.2f}V -> {heater_values[38]:.2f}V")
                     print(f"Input B (H37): {prev_value_37:.2f}V -> {heater_values[37]:.2f}V")
                     
                     print(f"\nAverage outputs (from {NUM_MEASUREMENTS} measurements):")
@@ -166,7 +168,7 @@ def main():
                         if is_active and outputs[ch_idx] is not None:
                             print(f"O{ch_idx+1}: {outputs[ch_idx]}V")
                     
-                    prev_value_36 = heater_values[36]
+                    prev_value_38 = heater_values[38]
                     prev_value_37 = heater_values[37]
                 
                 time.sleep(0.1)

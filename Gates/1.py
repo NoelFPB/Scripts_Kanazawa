@@ -6,7 +6,6 @@ import random
 from scipy.stats import qmc
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, WhiteKernel, ConstantKernel
-from sklearn.gaussian_process.kernels import Matern
 
 # Serial port configuration 
 SERIAL_PORT = 'COM3'
@@ -126,7 +125,13 @@ class BayesianLogicGateOptimizer:
             return None
 
     def evaluate_configuration(self, config):
-  
+        """
+        Logic gate scoring using worst-case extinction ratio:
+        ER = 10 * log10(min_HIGH_outputs / max_LOW_outputs)
+        
+        This is more meaningful for logic gate reliability than the paper's method.
+        """
+        
         # Collect all outputs for analysis
         high_outputs = []
         low_outputs = []
@@ -141,7 +146,7 @@ class BayesianLogicGateOptimizer:
             expected_high = self.truth_table[input_state]
             
             self.send_heater_values(current_config)
-            time.sleep(0.25)
+            time.sleep(0.20)
             
             output = self.measure_output()
             if output is None:
@@ -196,30 +201,18 @@ class BayesianLogicGateOptimizer:
         # === SIGNAL STRENGTH (20 points) ===
         # Reward higher absolute output levels for better SNR
         mean_high = sum(high_outputs) / len(high_outputs)
-        strength_score = 20 * min(1.0, mean_high / 4.0)  # Scale to 3V max
-            
+        strength_score = 20 * min(1.0, mean_high / 3.0)  # Scale to 3V max
+        
         # === CONSISTENCY (10 points) ===
         # Reward consistent outputs within each logic state
         high_std = np.std(high_outputs) if len(high_outputs) > 1 else 0
         low_std = np.std(low_outputs) if len(low_outputs) > 1 else 0
         avg_std = (high_std + low_std) / 2
-        consistency_score = 10 * np.exp(-avg_std * 3)  # Full points for <0.2V std dev
+        consistency_score = 10 * np.exp(-avg_std * 5)  # Full points for <0.2V std dev
         
+        # === COMBINE SCORES ===
         total_score = er_score + strength_score + consistency_score
         
-        # Add this after calculating consistency_score:
-        # Extra penalty for HIGH output variation
-        if len(high_outputs) > 1:
-            high_range = max(high_outputs) - min(high_outputs)
-            high_consistency_penalty = -20 * min(1.0, high_range / 1.0)  # -20 points for 1V+ variation
-            total_score += high_consistency_penalty
-
-        if len(low_outputs) > 1:
-            low_range = max(low_outputs) - min(low_outputs)
-            low_consistency_penalty = -20 * min(1.0, low_range / 1.0)  # -20 points for 1V+ variation
-            total_score += low_consistency_penalty
-        
-
         # Cap at 100 points
         final_score = min(100, max(-50, total_score))
         
@@ -231,6 +224,12 @@ class BayesianLogicGateOptimizer:
             print(f"  LOW outputs: {[f'{l:.3f}V' for l in low_outputs]} (max: {max_low:.3f}V)")
             print(f"  Output pattern: {[f'{o:.3f}V' for o in all_outputs]}")
             print(f"  Expected pattern: {[d['expected'] for d in output_details]}")
+            
+            # Also show paper's method for comparison
+            sorted_outputs = sorted(all_outputs, reverse=True)
+            paper_er_linear = sorted_outputs[0] / max(sorted_outputs[1], 0.001)
+            paper_er_db = 10 * np.log10(paper_er_linear)
+            print(f"  (Paper's method would be: {paper_er_db:.2f}dB)")
         
         return final_score
 
@@ -257,19 +256,12 @@ class BayesianLogicGateOptimizer:
         print(f"    Fitting GP with {len(X)} points, score range: [{y.min():.1f}, {y.max():.1f}]")
         
         # Robust kernel for photonic device optimization
-        # kernel = (
-        #     ConstantKernel(1.0, constant_value_bounds=(0.1, 100)) *
-        #     RBF(length_scale=1.0, length_scale_bounds=(0.1, 10.0)) +
-        #     WhiteKernel(noise_level=0.5, noise_level_bounds=(0.01, 10.0))
-        # )
-        
-        # Try a more flexible kernel:
-
         kernel = (
-            ConstantKernel(1.0, constant_value_bounds=(0.1, 100.0)) * 
-            Matern(length_scale=1.0, length_scale_bounds=(0.1, 10.0), nu=1.5) +
-            WhiteKernel(noise_level=0.25, noise_level_bounds=(0.001, 1))
+            ConstantKernel(1.0, constant_value_bounds=(0.1, 100)) *
+            RBF(length_scale=1.0, length_scale_bounds=(0.1, 10.0)) +
+            WhiteKernel(noise_level=0.5, noise_level_bounds=(0.01, 10.0))
         )
+        
         try:
             self.gp = GaussianProcessRegressor(
                 kernel=kernel,
@@ -287,7 +279,58 @@ class BayesianLogicGateOptimizer:
             print(f"    GP fitting failed: {e}")
             self.gp = None
             return False
+
+    def acquisition_function(self, x):
+        """Upper Confidence Bound acquisition function"""
+        if self.gp is None:
+            return random.random()
         
+        x = x.reshape(1, -1)
+        mu, sigma = self.gp.predict(x, return_std=True)
+        mu, sigma = mu[0], sigma[0]
+        
+        # UCB with exploration parameter
+        beta = 3.0  # Exploration vs exploitation balance
+        ucb = mu + beta * sigma
+        
+        return ucb
+
+    def suggest_next_config(self):
+        """Suggest next configuration using Bayesian optimization"""
+        if self.gp is None or len(self.X_evaluated) < 5:
+            # Random exploration for initial points
+            x = np.random.uniform(V_MIN, V_MAX, len(MODIFIABLE_HEATERS))
+            return self.array_to_config(x)
+        
+        # Generate candidate configurations
+        n_candidates = 3000
+        
+        # Mix of random and local search candidates
+        candidates = []
+        
+        # 70% random exploration
+        n_random = int(0.7 * n_candidates)
+        random_candidates = np.random.uniform(V_MIN, V_MAX, size=(n_random, len(MODIFIABLE_HEATERS)))
+        candidates.extend(random_candidates)
+        
+        # 30% local search around best configurations
+        n_local = n_candidates - n_random
+        if self.best_config:
+            for _ in range(n_local):
+                base_x = self.config_to_array(self.best_config)
+                noise = np.random.normal(0, 0.5, len(MODIFIABLE_HEATERS))
+                candidate = np.clip(base_x + noise, V_MIN, V_MAX)
+                candidates.append(candidate)
+        
+        candidates = np.array(candidates)
+        
+        # Evaluate acquisition function
+        acquisition_values = [self.acquisition_function(c) for c in candidates]
+        
+        # Select best candidate
+        best_idx = np.argmax(acquisition_values)
+        return self.array_to_config(candidates[best_idx])
+
     def initial_sampling(self, n_samples=20):
         """Initial sampling focused on finding real working logic gates"""
         print(f"Initial sampling with {n_samples} configurations...")
@@ -390,14 +433,8 @@ class BayesianLogicGateOptimizer:
                 # Predict scores for ALL candidates (this is fast!)
                 mu, sigma = self.gp.predict(candidates, return_std=True)
                 
-                if self.best_score < 50:
-                    beta = 4.0
-                elif self.best_score < 60:
-                    beta = 2.0
-                else:
-                    beta = 2.0
-
-                print("Beta ", beta)
+                # UCB acquisition function
+                beta = 3.0
                 ucb_scores = mu + beta * sigma
                 
                 # Select the top candidates to actually test
@@ -509,6 +546,10 @@ class BayesianLogicGateOptimizer:
             max_low = max(low_outputs)
             logic_separation = min_high - max_low
             
+            # Paper's extinction ratio (largest vs second-largest)
+            sorted_outputs = sorted(all_outputs, reverse=True)
+            largest = sorted_outputs[0]
+            second_largest = sorted_outputs[1]
             
             print(f"\n=== PERFORMANCE METRICS ===")
             
@@ -525,6 +566,14 @@ class BayesianLogicGateOptimizer:
                 print(f"  - Minimum HIGH: {min_high:.4f}V")
                 print(f"  - Maximum LOW:  {max_low:.4f}V")
                 print(f"  - Overlap:      {abs(logic_separation):.4f}V")
+            
+            # Show paper's method for comparison
+            if second_largest > 0.001:
+                paper_er_linear = largest / second_largest
+                paper_er_db = 10 * np.log10(paper_er_linear)
+                print(f"\nPaper's Extinction Ratio: {paper_er_db:.2f} dB (reference only)")
+                print(f"  - Largest output:       {largest:.4f}V")
+                print(f"  - Second largest:       {second_largest:.4f}V")
             
             print(f"\nHIGH outputs: {[f'{h:.3f}V' for h in high_outputs]}")
             print(f"LOW outputs:  {[f'{l:.3f}V' for l in low_outputs]}")
@@ -577,19 +626,16 @@ class BayesianLogicGateOptimizer:
 
         try:
             # Phase 1: Initial sampling
-            self.initial_sampling(n_samples=20)
+            self.initial_sampling(n_samples=30)
             
             # Phase 2: Bayesian optimization
-            self.bayesian_optimize(n_iterations=20)
+            self.bayesian_optimize(n_iterations=25)
             
-            # # Phase 3: Local exploration around best
-            self.explore_around_best(n_samples=15)
-            
-            # # Phase 4: Final Bayesian refinement
-            self.bayesian_optimize(n_iterations=20)
-            
+            # Phase 3: Local exploration around best
             self.explore_around_best(n_samples=8)
             
+            # Phase 4: Final Bayesian refinement
+            self.bayesian_optimize(n_iterations=10)
             
             # Test final configuration
             self.test_final_configuration()
