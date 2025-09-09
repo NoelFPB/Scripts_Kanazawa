@@ -100,7 +100,7 @@ def plot_simple_extinction_ratios(file_path, method='worst_case', sheet_name=Non
     gates = df['Gate'].unique()
     
     # Create 2x3 subplot grid
-    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
     axes = axes.flatten()
     
     for gate_idx, gate in enumerate(gates):

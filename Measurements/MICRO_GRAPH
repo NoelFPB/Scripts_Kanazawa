@@ -47,10 +47,12 @@ def create_output_plot(df, save_plots=True):
     
     # Graph: Output vs Time - Simple continuous line
     ax.plot(df_sorted['timestamp_us'], df_sorted['OUT'], linewidth=2, color='red', alpha=0.8)
-    ax.set_ylabel('Output (V)', fontsize=12)
-    ax.set_xlabel('Time (μs)', fontsize=12)  # Using microsecond symbol
+    ax.set_ylabel('Output (V)', fontsize=24)
+    ax.set_xlabel('Time (μs)', fontsize=24)  # Using microsecond symbol
+    ax.tick_params(axis='both', labelsize=20)  # change 18 to whatever size you want
+    
     ax.grid(True, alpha=0.3)
-    ax.set_title('Output Signal vs Time')
+    #ax.set_title('Output Signal vs Time')
     
     # Add vertical lines to show state transitions
     state_changes = []
@@ -79,8 +81,8 @@ def create_output_plot(df, save_plots=True):
     ax.ticklabel_format(style='plain', axis='x')  # Disable scientific notation on x-axis
     
     # Set the ticks
-    ax.set_xticks(major_ticks)
-    ax.set_xticks(minor_ticks, minor=True)
+    # ax.set_xticks(major_ticks)
+    # ax.set_xticks(minor_ticks, minor=True)
     
     # Improve grid appearance
     ax.grid(True, which='major', alpha=0.3, linewidth=1)
